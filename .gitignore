@@ -1,0 +1,43 @@
+# Navigate to your project directory
+cd C:\service-gateway
+
+# Create .gitignore file with content directly
+@"
+# Environment variables and secrets
+.env
+*.env
+.env.local
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+backup/
+*.bak
+*.backup
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Sensitive data
+credentials.json
+secrets.json
+"@ | Set-Content -Path ".gitignore" -Encoding UTF8
