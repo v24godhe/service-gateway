@@ -22,6 +22,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from utils.error_handler import error_handler
 from utils.input_sanitizer import input_sanitizer
 
+from services.query_service import QueryService
+from utils.user_manager import get_user
+from models.query_schemas import DynamicQueryRequest, DynamicQueryResponse
+from utils.query_validator import query_validator
 
 
 app = FastAPI(title="Service Gateway", version="1.0.0")
@@ -39,6 +43,7 @@ app.add_middleware(RequestTrackingMiddleware)
 db_connector = StyrDatabaseConnector()
 order_service = OrderService(db_connector)
 customer_service = CustomerService(db_connector)
+query_service = QueryService(db_connector)
 
 app.add_middleware(
     CORSMiddleware,
@@ -123,13 +128,63 @@ async def search_customers(
     auth_user=Depends(verify_auth_token)
 ):
     sanitized_data = input_sanitizer.sanitize_request_data(search_request.dict())
-    sanitized_request = CustomerByIdRequest(**sanitized_data)
+    sanitized_request = CustomerSearchRequest(**sanitized_data)  # ✅ FIXED
     return await customer_service.search_customers(
         sanitized_request,
         getattr(request.state, 'request_id', None)
     )
 
 
+@app.post("/api/execute-query")
+async def execute_query(
+    request: Request,
+    query_request: DynamicQueryRequest,
+    auth_user=Depends(verify_auth_token)
+):
+    username = request.headers.get("X-Username", "unknown")
+    
+    user = get_user(username)
+    if not user:
+        return response_formatter.error_response(
+            message=f"Unknown user: {username}",
+            error_code="UNKNOWN_USER"
+        ).dict()
+    
+    # Validate SQL
+    is_valid, error = query_validator.validate_query(query_request.query)
+    if not is_valid:
+        return response_formatter.error_response(
+            message=f"Invalid query: {error}",
+            error_code="INVALID_QUERY"
+        ).dict()
+    
+    # Check user access
+    has_access, access_error = query_validator.validate_user_access(
+        query_request.query, 
+        user
+    )
+    if not has_access:
+        return response_formatter.error_response(
+            message=access_error,
+            error_code="ACCESS_DENIED"
+        ).dict()
+    
+    # Execute query
+    return await query_service.execute_dynamic_query(
+        query_request, 
+        getattr(request.state, 'request_id', None),
+        username
+    )
+
+@app.get("/api/schema")
+async def get_database_schema(
+    request: Request,
+    auth_user=Depends(verify_auth_token)
+):
+    """Get database schema metadata for AI query generation"""
+    return await query_service.get_database_schema(
+        getattr(request.state, 'request_id', None)
+    )
 
 # Helth Checking
 
