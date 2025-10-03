@@ -1,66 +1,268 @@
+"""
+Comprehensive RBAC Rules - All STYR Database Tables
+"""
+
 from utils.user_manager import UserRole
 
-# Table access permissions
+# Complete table access permissions for all roles
 TABLE_PERMISSIONS = {
     UserRole.CEO: {
-        "tables": "ALL",  # Can access all 11 tables
-        "row_filter": None,
-        "sensitive_columns": []  # Can see everything
+        "tables": [
+            # Customers & Master Data
+            "DCPO.KHKNDHUR",      # Customers (100+ columns)
+            
+            # Articles & Inventory
+            "DCPO.AHARTHUR",      # Articles - main
+            "EGU.AYARINFR",       # Articles - additional info
+            
+            # Orders (Sales)
+            "DCPO.OHKORDHR",      # Orders - header (97 columns)
+            "DCPO.ORKORDRR",      # Orders - rows (58 columns)
+            
+            # Purchase Orders
+            "DCPO.LHLEVHUR",      # Suppliers
+            "DCPO.IHIORDHR",      # Purchase Order - header
+            "DCPO.IRIORDRR",      # Purchase Order - rows
+            
+            # Financial
+            "DCPO.KRKFAKTR",      # Invoices
+            "DCPO.KIINBETR",      # Incoming Payments
+            
+            # Statistics & Analytics
+            "EGU.WSOUTSAV",       # Sales Statistics
+        ],
+        "row_filter": None,  # No restrictions
+        "sensitive_columns": [],  # Can see everything
+        "description": "Full access to all tables and columns"
     },
     
     UserRole.FINANCE: {
         "tables": [
-            "DCPO.KHKNDHUR",  # Customers
-            "DCPO.KRKFAKTR",  # Invoices
-            "DCPO.KIINBETR",  # Payments
-            "DCPO.OHKORDHR",  # Orders (for finance info)
+            # Customers (for AR/credit management)
+            "DCPO.KHKNDHUR",      # Customers
+            
+            # Financial Tables
+            "DCPO.KRKFAKTR",      # Invoices
+            "DCPO.KIINBETR",      # Incoming Payments
+            
+            # Orders (for revenue tracking)
+            "DCPO.OHKORDHR",      # Orders - header
+            "DCPO.ORKORDRR",      # Orders - rows
+            
+            # Purchase (for AP tracking)
+            "DCPO.IHIORDHR",      # Purchase Order - header
+            "DCPO.IRIORDRR",      # Purchase Order - rows
+            "DCPO.LHLEVHUR",      # Suppliers
+            
+            # Analytics
+            "EGU.WSOUTSAV",       # Sales Statistics
         ],
-        "row_filter": "KHSTS='1'",  # Only active customers
-        "sensitive_columns": []
+        "row_filter": "KHSTS='1'",  # Only active records
+        "sensitive_columns": [],  # Finance can see all financial data
+        "description": "Full financial data access including AR, AP, invoices, payments"
     },
     
     UserRole.LOGISTICS: {
         "tables": [
-            "DCPO.OHKORDHR",  # Orders
-            "DCPO.ORKORDRR",  # Order lines
-            "DCPO.LHLEVHUR",  # Suppliers
-            "DCPO.IHIORDHR",  # Purchase orders
-            "DCPO.IRIORDRR",  # Purchase order lines
+            # Orders Management
+            "DCPO.OHKORDHR",      # Orders - header
+            "DCPO.ORKORDRR",      # Orders - rows
+            
+            # Purchase & Suppliers
+            "DCPO.LHLEVHUR",      # Suppliers
+            "DCPO.IHIORDHR",      # Purchase Order - header
+            "DCPO.IRIORDRR",      # Purchase Order - rows
+            
+            # Inventory
+            "DCPO.AHARTHUR",      # Articles - main
+            "EGU.AYARINFR",       # Articles - additional info
+            
+            # Customer info (for delivery)
+            "DCPO.KHKNDHUR",      # Customers (address info only)
         ],
-        "row_filter": "OHOST IN ('1','2','3')",  # Open orders only
-        "sensitive_columns": ["OHBLF", "ORPRS"]  # Hide pricing
+        "row_filter": "OHOST IN ('1','2','3')",  # Open/processing orders only
+        "sensitive_columns": [
+            # Hide pricing columns
+            "OHBLF", "OHBLM", "OHFAV", "OHBLOU",  # Order pricing
+            "ORPRS", "ORRAB", "OROMO",  # Row pricing
+            "IRIPR", "IRRPO",  # Purchase pricing
+            
+            # Hide credit information
+            "KHKGÄ", "KHBLE", "KHSAL", "KHRPF",  # Customer credit
+        ],
+        "description": "Order fulfillment, inventory, and delivery management without pricing"
     },
     
     UserRole.CUSTOMER_SERVICE: {
         "tables": [
-            "DCPO.KHKNDHUR",  # Customers
-            "DCPO.OHKORDHR",  # Orders
-            "DCPO.ORKORDRR",  # Order lines
+            # Customer Information
+            "DCPO.KHKNDHUR",      # Customers
+            
+            # Orders
+            "DCPO.OHKORDHR",      # Orders - header
+            "DCPO.ORKORDRR",      # Orders - rows
+            
+            # Articles (for product info)
+            "DCPO.AHARTHUR",      # Articles - main
+            "EGU.AYARINFR",       # Articles - additional info
+            
+            # Invoices (for customer inquiries)
+            "DCPO.KRKFAKTR",      # Invoices
         ],
-        "row_filter": "KHSTS='1'",
-        "sensitive_columns": ["KHKGÄ", "KHBLE"]  # Hide credit limit
+        "row_filter": "KHSTS='1'",  # Only active customers
+        "sensitive_columns": [
+            # Hide sensitive financial data
+            "KHKGÄ", "KHBLE", "KHSAL", "KHRPF",  # Credit limits & balances
+            "KRBLF", "KRBLB", "KRBKR",  # Invoice amounts (show only totals)
+        ],
+        "description": "Customer support with order and product information"
     },
     
     UserRole.CALL_CENTER: {
         "tables": [
-            "DCPO.KHKNDHUR",  # Customers
-            "DCPO.OHKORDHR",  # Orders
+            # Basic customer info
+            "DCPO.KHKNDHUR",      # Customers (limited columns)
+            
+            # Order status
+            "DCPO.OHKORDHR",      # Orders - header (status only)
+            
+            # Product info
+            "DCPO.AHARTHUR",      # Articles - main
         ],
-        "row_filter": "KHSTS='1'",
-        "sensitive_columns": ["KHKGÄ", "KHBLE", "KHRPF"]  # Hide financial data
+        "row_filter": "KHSTS='1'",  # Only active customers
+        "sensitive_columns": [
+            # Hide all financial data
+            "KHKGÄ", "KHBLE", "KHSAL", "KHRPF", "KHFKR", "KHPGR",  # Customer financials
+            "OHBLF", "OHBLM", "OHFAV", "OHBLOU",  # Order pricing
+            "KRBLF", "KRBLB", "KRBKR", "KRFNR",  # Invoice data
+            
+            # Hide sensitive personal data
+            "KHPNR", "KHORGNR",  # Personal/org numbers
+        ],
+        "description": "Basic customer lookup and order status inquiry"
+    },
+    
+    UserRole.UNIT_MANAGER: {
+        "tables": [
+            # Customer data for their department
+            "DCPO.KHKNDHUR",      # Customers
+            
+            # Orders for their department
+            "DCPO.OHKORDHR",      # Orders - header
+            "DCPO.ORKORDRR",      # Orders - rows
+            
+            # Sales analytics
+            "EGU.WSOUTSAV",       # Sales Statistics
+            
+            # Articles
+            "DCPO.AHARTHUR",      # Articles - main
+        ],
+        "row_filter": "OHSLJ = '{user.department}'",  # Department filter (dynamic)
+        "sensitive_columns": [
+            "KHKGÄ",  # Credit limit (partial restriction)
+        ],
+        "description": "Department-specific sales and customer management"
     }
 }
 
+# Column name mapping for user-friendly display
+COLUMN_FRIENDLY_NAMES = {
+    # Customers (KHKNDHUR)
+    'KHKNR': 'Customer Number',
+    'KHFKN': 'Customer Name',
+    'KHTEL': 'Phone Number',
+    'KHFA1': 'Address Line 1',
+    'KHFA2': 'Address Line 2',
+    'KHFA3': 'City',
+    'KHFA4': 'Postal Code',
+    'KHKGÄ': 'Credit Limit',
+    'KHSTS': 'Status',
+    'KHMAI': 'Email',
+    'KHPNR': 'Personal Number',
+    'KHORGNR': 'Organization Number',
+    'KHBLE': 'Balance',
+    'KHSAL': 'Balance Accounting Currency',
+    
+    # Orders Header (OHKORDHR)
+    'OHONR': 'Order Number',
+    'OHKNR': 'Customer Number',
+    'OHDAO': 'Order Date',
+    'OHDAL': 'Delivery Date',
+    'OHOST': 'Order Status',
+    'OHBLF': 'Invoice Amount',
+    'OHVAL': 'Currency Code',
+    'OHSLJ': 'Seller ID',
+    
+    # Orders Rows (ORKORDRR)
+    'ORONR': 'Order Number',
+    'ORORN': 'Order Line Number',
+    'ORANR': 'Article Number',
+    'ORANT': 'Quantity',
+    'ORPRS': 'Price',
+    'ORRAB': 'Discount',
+    
+    # Invoices (KRKFAKTR)
+    'KRFNR': 'Invoice Number',
+    'KRKNR': 'Customer Number',
+    'KRDAF': 'Invoice Date',
+    'KRDFF': 'Due Date',
+    'KRBLF': 'Invoice Amount',
+    
+    # Payments (KIINBETR)
+    'KIKNR': 'Customer Number',
+    'KIDAT': 'Payment Date',
+    'KIBEL': 'Payment Amount',
+    
+    # Articles (AHARTHUR)
+    'AHANR': 'Article Number',
+    'AHBEN': 'Article Description',
+    'AHLAG': 'Warehouse',
+    
+    # Suppliers (LHLEVHUR)
+    'LHLNR': 'Supplier Number',
+    'LHBEN': 'Supplier Name',
+    'LHTEL': 'Phone Number',
+    
+    # Purchase Orders Header (IHIORDHR)
+    'IHONR': 'Purchase Order Number',
+    'IHLNR': 'Supplier Number',
+    'IHDAO': 'Order Date',
+    'IHOST': 'Order Status',
+    
+    # Purchase Orders Rows (IRIORDRR)
+    'IRONR': 'Purchase Order Number',
+    'IRORN': 'Order Line Number',
+    'IRANR': 'Article Number',
+    'IRKVB': 'Quantity Ordered',
+    'IRIPR': 'Purchase Price',
+}
+
 def get_allowed_tables(role: UserRole) -> list:
+    """Get list of tables accessible by role"""
     perms = TABLE_PERMISSIONS.get(role, {})
-    if perms.get("tables") == "ALL":
-        return [
-            "DCPO.KHKNDHUR", "DCPO.AHARTHUR", "EGU.AYARINFR",
-            "DCPO.OHKORDHR", "DCPO.ORKORDRR", "DCPO.LHLEVHUR",
-            "DCPO.IHIORDHR", "DCPO.IRIORDRR", "DCPO.KRKFAKTR",
-            "DCPO.KIINBETR", "EGU.WSOUTSAV"
-        ]
     return perms.get("tables", [])
 
 def get_sensitive_columns(role: UserRole) -> list:
-    return TABLE_PERMISSIONS.get(role, {}).get("sensitive_columns", [])
+    """Get list of sensitive columns for role"""
+    perms = TABLE_PERMISSIONS.get(role, {})
+    return perms.get("sensitive_columns", [])
+
+def get_row_filter(role: UserRole, user_department: str = None) -> str:
+    """Get row-level filter for role"""
+    perms = TABLE_PERMISSIONS.get(role, {})
+    filter_rule = perms.get("row_filter")
+    
+    # Replace dynamic placeholders
+    if filter_rule and user_department and "{user.department}" in filter_rule:
+        filter_rule = filter_rule.replace("{user.department}", user_department)
+    
+    return filter_rule
+
+def get_friendly_column_name(technical_name: str) -> str:
+    """Convert technical column name to user-friendly name"""
+    return COLUMN_FRIENDLY_NAMES.get(technical_name, technical_name)
+
+def get_role_description(role: UserRole) -> str:
+    """Get description of role permissions"""
+    perms = TABLE_PERMISSIONS.get(role, {})
+    return perms.get("description", "No description available")
