@@ -36,6 +36,8 @@ from services.export_service import ExportService
 import logging
 
 from services.permission_management_service import PermissionManagementService
+from typing import List
+from fastapi import Body, Header
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -239,17 +241,61 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
     # Get or create conversation session
     conversation = conversation_manager.get_or_create_session(session_id, username)
     
+    # Validate user access
     has_access, access_error = query_validator.validate_user_access(query_request.query, user)
     
+    # If access denied, create permission request
     if not has_access:
-        return {
-            "success": False,
-            "message": access_error,
-            "error_code": "ACCESS_DENIED"
-        }
-
-    # Add user message to conversation history
-    conversation.add_message('user', question)
+        # Extract table name from access_error message
+        # Example error: "Access denied to table DCPO.KRKFAKTR"
+        blocked_table = "Unknown Table"
+        if access_error and "table" in access_error.lower():
+            # Try to extract table name from error message
+            parts = access_error.split()
+            for i, part in enumerate(parts):
+                if part.lower() in ["table", "tables"]:
+                    if i + 1 < len(parts):
+                        blocked_table = parts[i + 1].strip(".,;:")
+                        break
+        
+        # If still couldn't extract, try to get from SQL query
+        if blocked_table == "Unknown Table":
+            try:
+                # Extract tables from the SQL in query_request.query
+                sql_upper = query_request.query.upper()
+                if "FROM" in sql_upper:
+                    from_part = sql_upper.split("FROM")[1].split()[0]
+                    blocked_table = from_part.strip()
+            except:
+                pass
+        
+        # Create permission request
+        request_id = None
+        if permission_service:
+            try:
+                request_id = permission_service.create_permission_request(
+                    user_id=username,
+                    user_role=user_role,
+                    requested_table=blocked_table,
+                    original_question=question,
+                    blocked_sql=query_request.query,
+                    justification="User attempted to access restricted data"
+                )
+            except Exception as e:
+                print(f"Failed to create permission request: {e}")
+        
+        # Return friendly error with permission request info
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Access Denied",
+                "message": f"You don't have permission to access {blocked_table}",
+                "access_error": access_error,
+                "action": "A permission request has been automatically created" if request_id else "Please contact administrator",
+                "request_id": request_id if request_id else None,
+                "can_request_access": True
+            }
+        )
 
     # Add user message to conversation history
     conversation.add_message('user', question)
