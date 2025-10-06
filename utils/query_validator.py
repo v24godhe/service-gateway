@@ -91,7 +91,9 @@ class QueryValidator:
         tables_in_query = self._extract_tables_from_sql(sql)
         allowed_tables = get_allowed_tables(user.role)
         
-        if allowed_tables != "ALL":
+        if user.role == UserRole.CEO:
+            pass  # Skip table check for CEO
+        else:
             for table in tables_in_query:
                 if table not in allowed_tables:
                     return False, f"Access denied to table {table}"
@@ -110,12 +112,13 @@ class QueryValidator:
         tables = []
         sql_upper = sql.upper()
         
-        # Simple extraction (you can improve this)
-        for table in ["DCPO.KHKNDHUR", "DCPO.OHKORDHR", "DCPO.ORKORDRR", 
-                    "DCPO.KRKFAKTR", "DCPO.KIINBETR", "DCPO.LHLEVHUR",
-                    "DCPO.AHARTHUR", "EGU.AYARINFR", "EGU.WSOUTSAV",
-                    "DCPO.IHIORDHR", "DCPO.IRIORDRR"]:
-            if table in sql_upper:
+        # Extract SCHEMA.TABLE patterns
+        pattern = r'(?:FROM|JOIN)\s+([\w]+\.[\w]+)'
+        matches = re.finditer(pattern, sql_upper)
+        
+        for match in matches:
+            table = match.group(1)
+            if table not in tables:
                 tables.append(table)
         
         return tables

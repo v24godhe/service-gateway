@@ -177,7 +177,6 @@ COLUMN_FRIENDLY_NAMES = {
     'KHFA4': 'Postal Code',
     'KHKGÄ': 'Credit Limit',
     'KHSTS': 'Status',
-    'KHMAI': 'Email',
     'KHPNR': 'Personal Number',
     'KHORGNR': 'Organization Number',
     'KHBLE': 'Balance',
@@ -197,7 +196,9 @@ COLUMN_FRIENDLY_NAMES = {
     'ORONR': 'Order Number',
     'ORORN': 'Order Line Number',
     'ORANR': 'Article Number',
-    'ORANT': 'Quantity',
+    # 'ORANT': 'Quantity',  # Column does not exist - use ORKVB for Quantity
+    'ORKVB': 'Quantity Ordered',
+    'ORKVL': 'Quantity Delivered',
     'ORPRS': 'Price',
     'ORRAB': 'Discount',
     
@@ -215,7 +216,7 @@ COLUMN_FRIENDLY_NAMES = {
     
     # Articles (AHARTHUR)
     'AHANR': 'Article Number',
-    'AHBEN': 'Article Description',
+    'AHBES': 'Article Description',
     'AHLAG': 'Warehouse',
     
     # Suppliers (LHLEVHUR)

@@ -35,6 +35,8 @@ from fastapi.responses import StreamingResponse
 from services.export_service import ExportService
 import logging
 
+from services.permission_management_service import PermissionManagementService
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -75,6 +77,22 @@ def init_query_learning():
         return None
 
 query_learning_service = init_query_learning()
+
+# Initialize Permission Management Service
+def init_permission_management():
+    try:
+        conn_str = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+            f"Trusted_Connection=yes;"
+        )
+        return PermissionManagementService(conn_str)
+    except Exception as e:
+        print(f"Warning: Permission Management Service initialization failed: {e}")
+        return None
+
+permission_service = init_permission_management()
 
 def _is_followup_question(question: str) -> bool:
     """Detect if question is a follow-up based on pronouns and references"""
@@ -221,6 +239,18 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
     # Get or create conversation session
     conversation = conversation_manager.get_or_create_session(session_id, username)
     
+    has_access, access_error = query_validator.validate_user_access(query_request.query, user)
+    
+    if not has_access:
+        return {
+            "success": False,
+            "message": access_error,
+            "error_code": "ACCESS_DENIED"
+        }
+
+    # Add user message to conversation history
+    conversation.add_message('user', question)
+
     # Add user message to conversation history
     conversation.add_message('user', question)
     
@@ -653,6 +683,299 @@ async def get_circuit_breaker_status(request: Request):
         message="Circuit breaker status retrieved",
         request_id=getattr(request.state, 'request_id', None)
     ).dict()
+
+# -------------------- Super Admin Authentication --------------------
+
+@app.post("/api/admin/login")
+async def admin_login(
+    username: str = Body(...),
+    password: str = Body(...)  # You can add password validation later
+):
+    """
+    Super admin login
+    For now, just checks if user is super admin
+    TODO: Add password authentication
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    is_admin = permission_service.is_super_admin(username)
+    
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized as super admin")
+    
+    # Update last login
+    permission_service.update_admin_last_login(username)
+    
+    return {
+        "success": True,
+        "username": username,
+        "message": "Admin login successful"
+    }
+
+
+@app.get("/api/admin/check/{username}")
+async def check_admin_status(username: str):
+    """Check if a user is a super admin"""
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    is_admin = permission_service.is_super_admin(username)
+    
+    return {"is_admin": is_admin}
+
+
+# -------------------- Permission Requests --------------------
+
+@app.post("/api/permission-request")
+async def create_permission_request(
+    user_id: str = Body(...),
+    user_role: str = Body(...),
+    requested_table: str = Body(...),
+    original_question: str = Body(...),
+    blocked_sql: str = Body(None),
+    requested_columns: List[str] = Body(None),
+    justification: str = Body(None)
+):
+    """
+    Create a new permission request
+    Called when user tries to access restricted data
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    request_id = permission_service.create_permission_request(
+        user_id=user_id,
+        user_role=user_role,
+        requested_table=requested_table,
+        original_question=original_question,
+        requested_columns=requested_columns,
+        blocked_sql=blocked_sql,
+        justification=justification
+    )
+    
+    if request_id:
+        return {
+            "success": True,
+            "request_id": request_id,
+            "message": "Permission request created. An administrator will review it shortly."
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to create permission request")
+
+
+@app.get("/api/permission-requests/pending")
+async def get_pending_requests(admin_username: str = Header(None, alias="X-Admin-Username")):
+    """
+    Get all pending permission requests
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not admin_username or not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    requests = permission_service.get_pending_requests()
+    
+    return {
+        "pending_count": len(requests),
+        "requests": requests
+    }
+
+
+@app.get("/api/permission-requests/all")
+async def get_all_requests(
+    status: str = None,
+    limit: int = 100,
+    admin_username: str = Header(None, alias="X-Admin-Username")
+):
+    """
+    Get all permission requests with optional status filter
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not admin_username or not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    requests = permission_service.get_all_requests(status=status, limit=limit)
+    
+    return {
+        "total": len(requests),
+        "status_filter": status,
+        "requests": requests
+    }
+
+
+@app.post("/api/permission-requests/{request_id}/approve")
+async def approve_request(
+    request_id: int,
+    review_notes: str = Body(None),
+    temporary: bool = Body(False),
+    days_valid: int = Body(30),
+    admin_username: str = Header(..., alias="X-Admin-Username")
+):
+    """
+    Approve a permission request
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    # Calculate expiration if temporary
+    expires_at = None
+    if temporary:
+        from datetime import datetime, timedelta
+        expires_at = datetime.now() + timedelta(days=days_valid)
+    
+    success = permission_service.approve_permission_request(
+        request_id=request_id,
+        admin_username=admin_username,
+        review_notes=review_notes,
+        expires_at=expires_at
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": "Permission request approved and RBAC rules updated",
+            "temporary": temporary,
+            "expires_at": expires_at.isoformat() if expires_at else None
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to approve request")
+
+
+@app.post("/api/permission-requests/{request_id}/deny")
+async def deny_request(
+    request_id: int,
+    review_notes: str = Body(...),
+    admin_username: str = Header(..., alias="X-Admin-Username")
+):
+    """
+    Deny a permission request
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    success = permission_service.deny_permission_request(
+        request_id=request_id,
+        admin_username=admin_username,
+        review_notes=review_notes
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": "Permission request denied"
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to deny request")
+
+
+# -------------------- RBAC Management --------------------
+
+@app.get("/api/rbac/rules/{role}")
+async def get_rbac_rules(role: str):
+    """
+    Get RBAC rules for a specific role
+    Returns allowed tables and column restrictions
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    rules = permission_service.get_rbac_rules_for_role(role)
+    
+    return rules
+
+
+@app.get("/api/rbac/rules")
+async def get_all_rbac_rules(admin_username: str = Header(None, alias="X-Admin-Username")):
+    """
+    Get all RBAC rules for all roles
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not admin_username or not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    rules = permission_service.get_all_rbac_rules()
+    
+    return {"roles": rules}
+
+
+@app.post("/api/rbac/add-rule")
+async def add_rbac_rule(
+    user_role: str = Body(...),
+    table_name: str = Body(...),
+    allowed_columns: List[str] = Body(None),
+    blocked_columns: List[str] = Body(None),
+    notes: str = Body(None),
+    admin_username: str = Header(..., alias="X-Admin-Username")
+):
+    """
+    Add or update an RBAC rule
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    success = permission_service.add_rbac_rule(
+        user_role=user_role,
+        table_name=table_name,
+        admin_username=admin_username,
+        allowed_columns=allowed_columns,
+        blocked_columns=blocked_columns,
+        notes=notes
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": f"RBAC rule updated for {user_role} on {table_name}"
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to add RBAC rule")
+
+
+# -------------------- Statistics & Monitoring --------------------
+
+@app.get("/api/permission-stats")
+async def get_permission_stats(admin_username: str = Header(..., alias="X-Admin-Username")):
+    """
+    Get permission management statistics
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    stats = permission_service.get_permission_stats()
+    
+    return stats
 
 
 if __name__ == "__main__":

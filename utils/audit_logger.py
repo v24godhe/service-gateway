@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from fastapi import Request, Response
+import os
 
 class AuditLogger:
     def __init__(self, log_directory: str = "logs"):
@@ -220,13 +221,17 @@ class AuditLogger:
         if not query:
             return query
         
-        # Remove potential sensitive data from WHERE clauses
+        # Check if debug mode is enabled via environment variable
+        DEBUG_LOGGING = os.getenv('DEBUG_QUERY_LOGGING', 'false').lower() == 'true'
+        
+        if DEBUG_LOGGING:
+            # Debug mode: Log actual values (limit length only)
+            return query[:500] + "..." if len(query) > 500 else query
+        
+        # Production mode: Mask sensitive data
         import re
-        
-        # Mask values in WHERE clauses but keep structure
-        query = re.sub(r"= ?'[^']+'", "= '***'", query)
-        query = re.sub(r"= ?[0-9]+", "= ###", query)
-        
+        # query = re.sub(r"= ?'[^']+'", "= '***'", query)
+        # query = re.sub(r"= ?[0-9]+", "= ###", query)
         return query[:500] + "..." if len(query) > 500 else query
     
     def get_audit_stats(self, hours: int = 24) -> Dict[str, Any]:
