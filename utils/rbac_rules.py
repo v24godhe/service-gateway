@@ -267,3 +267,38 @@ def get_role_description(role: UserRole) -> str:
     """Get description of role permissions"""
     perms = TABLE_PERMISSIONS.get(role, {})
     return perms.get("description", "No description available")
+
+def get_allowed_tables_with_dynamic(role: UserRole, user_id: str = None) -> list:
+    """Get allowed tables including dynamic permissions from database"""
+    import os
+    
+    # 1. Get static baseline rules
+    static_tables = get_allowed_tables(role)
+    
+    # 2. Load dynamic rules from database
+    try:
+        from services.permission_management_service import PermissionManagementService
+        
+        conn_str = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+            f"Trusted_Connection=yes;"
+        )
+        perm_service = PermissionManagementService(conn_str)
+        
+        # Get dynamic rules for this role
+        dynamic_rules = perm_service.get_rbac_rules_for_role(role.value)
+        
+        # Merge static + dynamic tables (remove duplicates)
+        if dynamic_rules and 'tables' in dynamic_rules and dynamic_rules['tables']:
+            combined = static_tables + dynamic_rules['tables']
+            all_tables = list(set(combined))  # Remove duplicates
+            print(f"✅ Dynamic RBAC loaded for {role.value}: {len(dynamic_rules['tables'])} additional tables")
+            return all_tables
+            
+    except Exception as e:
+        print(f"⚠️ Could not load dynamic rules: {e}")
+    
+    # Fallback to static rules
+    return static_tables

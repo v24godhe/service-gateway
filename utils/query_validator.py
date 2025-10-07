@@ -2,6 +2,7 @@ import re
 from typing import Tuple, List
 from utils.user_manager import User, UserRole
 from utils.rbac_rules import get_allowed_tables, get_sensitive_columns
+from utils.rbac_rules import get_allowed_tables_with_dynamic
 
 class QueryValidator:
     """Validates SQL queries for safety"""
@@ -89,22 +90,116 @@ class QueryValidator:
         
         # Extract tables from query
         tables_in_query = self._extract_tables_from_sql(sql)
-        allowed_tables = get_allowed_tables(user.role)
         
-        if user.role == UserRole.CEO:
-            pass  # Skip table check for CEO
-        else:
+        # Load allowed tables (static + dynamic)
+        from utils.rbac_rules import get_allowed_tables_with_dynamic
+        allowed_tables = get_allowed_tables_with_dynamic(user.role, user.username)
+        
+        print(f"🔍 User: {user.username} ({user.role.value})")
+        print(f"🔍 Allowed tables: {allowed_tables}")
+        print(f"🔍 Requested tables: {tables_in_query}")
+        
+        # Check table access
+        if user.role != UserRole.CEO:
             for table in tables_in_query:
                 if table not in allowed_tables:
-                    return False, f"Access denied to table {table}"
+                    # AUTO-CREATE PERMISSION REQUEST
+                    from services.permission_management_service import PermissionManagementService
+                    import os
+                    
+                    try:
+                        conn_str = (
+                            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+                            f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+                            f"Trusted_Connection=yes;"
+                        )
+                        perm_service = PermissionManagementService(conn_str)
+                        
+                        request_id = perm_service.create_permission_request(
+                            user_id=user.username,
+                            user_role=user.role.value,
+                            requested_table=table,
+                            original_question=f"Access attempted: {sql[:200]}",
+                            blocked_sql=sql,
+                            justification="Auto-generated: User needs table access"
+                        )
+                        
+                        return False, f"Access denied to table {table}. Permission request #{request_id} created."
+                    except Exception as e:
+                        print(f"❌ Failed to create permission request: {e}")
+                        return False, f"Access denied to table {table}"
         
-        # Check sensitive columns
+
+        # Check sensitive columns (but skip if dynamically allowed)
         sensitive_cols = get_sensitive_columns(user.role)
         if sensitive_cols:
+            # Load dynamic column permissions
+            try:
+                from services.permission_management_service import PermissionManagementService
+                import os
+                
+                conn_str = (
+                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                    f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+                    f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+                    f"Trusted_Connection=yes;"
+                )
+                perm_service = PermissionManagementService(conn_str)
+                dynamic_rules = perm_service.get_rbac_rules_for_role(user.role.value)
+                
+                # Get dynamically allowed columns for the tables in this query
+                allowed_sensitive_cols = []
+                if dynamic_rules and 'restrictions' in dynamic_rules:
+                    for table in tables_in_query:
+                        if table in dynamic_rules['restrictions']:
+                            table_allowed = dynamic_rules['restrictions'][table].get('allowed_columns', [])
+                            if table_allowed:
+                                allowed_sensitive_cols.extend(table_allowed)
+                
+                print(f"🔍 Sensitive columns: {sensitive_cols}")
+                print(f"🔍 Dynamically allowed: {allowed_sensitive_cols}")
+                
+            except Exception as e:
+                print(f"⚠️ Could not load dynamic column permissions: {e}")
+                allowed_sensitive_cols = []
+            
+            # Check each sensitive column
             for col in sensitive_cols:
                 if col in sql.upper():
-                    return False, f"Column {col} is restricted"
-        
+                    # Skip if dynamically allowed
+                    if col in allowed_sensitive_cols:
+                        print(f"✅ Column {col} allowed via dynamic permission")
+                        continue
+                        
+                    # Create permission request
+                    from services.permission_management_service import PermissionManagementService
+                    import os
+                    
+                    try:
+                        conn_str = (
+                            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+                            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+                            f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+                            f"Trusted_Connection=yes;"
+                        )
+                        perm_service = PermissionManagementService(conn_str)
+                        
+                        request_id = perm_service.create_permission_request(
+                            user_id=user.username,
+                            user_role=user.role.value,
+                            requested_table=tables_in_query[0] if tables_in_query else "UNKNOWN",
+                            requested_columns=[col],
+                            original_question=f"Column access: {sql[:200]}",
+                            blocked_sql=sql,
+                            justification=f"Auto-generated: User needs access to column {col}"
+                        )
+                        
+                        return False, f"Column {col} is restricted. Permission request #{request_id} created."
+                    except Exception as e:
+                        print(f"❌ Failed to create permission request: {e}")
+                        return False, f"Column {col} is restricted"
+
         return True, "OK"
 
     def _extract_tables_from_sql(self, sql: str) -> list:

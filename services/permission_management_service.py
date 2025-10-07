@@ -361,49 +361,44 @@ class PermissionManagementService:
     # ================================================================
     
     def get_rbac_rules_for_role(self, user_role: str) -> Dict[str, Any]:
-        """
-        Get RBAC rules for a specific role from database
-        
-        Args:
-            user_role: Role to get rules for
-            
-        Returns:
-            Dictionary with allowed tables and column restrictions
-        """
+        """Get RBAC rules for a specific role from database"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute("EXEC sp_get_rbac_rules @user_role=?", (user_role,))
             
-            allowed_tables = []
-            column_restrictions = {}
+            tables = []
+            restrictions = {}
             
             for row in cursor.fetchall():
-                table_name = row[2]
-                allowed_columns = json.loads(row[3]) if row[3] else None
-                blocked_columns = json.loads(row[4]) if row[4] else None
+                # Access by index: rule_id, user_role, table_name, allowed_columns, blocked_columns, is_active...
+                table_name = row[2]  # table_name is 3rd column
+                allowed_cols = row[3]  # allowed_columns
+                blocked_cols = row[4]  # blocked_columns
                 
-                allowed_tables.append(table_name)
+                tables.append(table_name)
                 
-                if allowed_columns or blocked_columns:
-                    column_restrictions[table_name] = {
-                        "allowed": allowed_columns,
-                        "blocked": blocked_columns
+                if allowed_cols or blocked_cols:
+                    restrictions[table_name] = {
+                        'allowed_columns': allowed_cols.split(',') if allowed_cols else None,
+                        'blocked_columns': blocked_cols.split(',') if blocked_cols else None,
+                        'notes': row[8] if len(row) > 8 else None  # notes column
                     }
             
             cursor.close()
             conn.close()
             
+            logger.info(f"✅ Loaded {len(tables)} dynamic tables for {user_role}: {tables}")
             return {
-                "allowed_tables": allowed_tables,
-                "column_restrictions": column_restrictions
+                'tables': tables,
+                'restrictions': restrictions
             }
             
         except Exception as e:
-            logger.error(f"Failed to get RBAC rules for {user_role}: {e}")
-            return {"allowed_tables": [], "column_restrictions": {}}
-    
+            logger.error(f"❌ Failed to get RBAC rules for {user_role}: {e}")
+            return {'tables': [], 'restrictions': {}}
+        
     def get_all_rbac_rules(self) -> Dict[str, Any]:
         """
         Get all RBAC rules grouped by role
