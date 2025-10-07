@@ -477,3 +477,6 @@
 2025-10-07 07:47:38 | INFO | {"event": "service_startup", "timestamp": "2025-10-07T07:47:38.007881", "service": "Service Gateway"}
 2025-10-07 07:57:22 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-07T07:57:22.085167", "service": "Service Gateway"}
 2025-10-07 07:57:25 | INFO | {"event": "service_startup", "timestamp": "2025-10-07T07:57:25.448426", "service": "Service Gateway"}
+2025-10-07 08:17:15 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-07T08:17:15.206554", "service": "Service Gateway"}
+2025-10-07 08:17:22 | INFO | {"event": "service_startup", "timestamp": "2025-10-07T08:17:22.191760", "service": "Service Gateway"}
+2025-10-07 08:22:36 | INFO | {"request_id": "8bbe137f-71fc-4b26-b351-5adc5101cb83", "timestamp": "2025-10-07T08:22:36.896003", "operation_type": "SELECT", "table_name": null, "query": "SELECT \n    o.OHONR AS Order_Number,\n    c.KHFKN AS Customer_Name,\n    o.OHBLF AS Invoice_Amount,\n    o.OHVAL AS Currency\nFROM \n    DCPO.OHKORDHR o\nINNER JOIN \n    DCPO.KHKNDHUR c ON o.OHKNR = c.KHKNR\nWHERE \n    o.OHOST = '1' AND \n    c.KHSTS = '1'\nORDER BY \n    o.OHONR", "execution_time_ms": 64.54849243164062, "row_count": 0, "success": true, "error": null}

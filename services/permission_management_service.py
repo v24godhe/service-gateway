@@ -372,18 +372,21 @@ class PermissionManagementService:
             restrictions = {}
             
             for row in cursor.fetchall():
-                # Access by index: rule_id, user_role, table_name, allowed_columns, blocked_columns, is_active...
-                table_name = row[2]  # table_name is 3rd column
-                allowed_cols = row[3]  # allowed_columns
-                blocked_cols = row[4]  # blocked_columns
+                table_name = row[2]  # table_name
+                allowed_cols = row[3]  # allowed_columns (JSON string)
+                blocked_cols = row[4]  # blocked_columns (JSON string)
                 
                 tables.append(table_name)
                 
                 if allowed_cols or blocked_cols:
+                    # Parse JSON strings to lists
+                    allowed_list = json.loads(allowed_cols) if allowed_cols else None
+                    blocked_list = json.loads(blocked_cols) if blocked_cols else None
+                    
                     restrictions[table_name] = {
-                        'allowed_columns': allowed_cols.split(',') if allowed_cols else None,
-                        'blocked_columns': blocked_cols.split(',') if blocked_cols else None,
-                        'notes': row[8] if len(row) > 8 else None  # notes column
+                        'allowed_columns': allowed_list,
+                        'blocked_columns': blocked_list,
+                        'notes': row[8] if len(row) > 8 else None
                     }
             
             cursor.close()

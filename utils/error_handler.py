@@ -6,6 +6,8 @@ import traceback
 import re
 from utils.audit_logger import audit_logger
 from utils.response_formatter import response_formatter
+import json
+from datetime import datetime
 
 class GlobalErrorHandler:
     
@@ -56,14 +58,21 @@ class GlobalErrorHandler:
             500: "Internal server error"
         }
         
+        user_message = user_messages.get(exc.status_code, sanitized_detail)
+        
+        error_response = response_formatter.error_response(
+            message=user_message,
+            error_code=f"HTTP_{exc.status_code}",
+            details=sanitized_detail,
+            request_id=getattr(request.state, 'request_id', None)
+        )
+        
+        # Convert to dict and ensure JSON serializable
+        response_dict = error_response.dict()
+        
         return JSONResponse(
             status_code=exc.status_code,
-            content=response_formatter.error_response(
-                message=user_messages.get(exc.status_code, sanitized_detail),
-                error_code=f"HTTP_{exc.status_code}",
-                details=sanitized_detail if exc.status_code != 500 else "Please contact support",
-                request_id=getattr(request.state, 'request_id', None)
-            ).dict()
+            content=json.loads(json.dumps(response_dict, default=str))
         )
     
     @staticmethod
@@ -88,13 +97,13 @@ class GlobalErrorHandler:
         )
         
         return JSONResponse(
-            status_code=422,
-            content=response_formatter.error_response(
-                message="Request validation failed",
-                error_code="VALIDATION_ERROR",
-                details=f"Invalid fields: {', '.join([e['field'] for e in sanitized_errors])}",
-                request_id=getattr(request.state, 'request_id', None)
-            ).dict()
+            status_code=exc.status_code,
+            content=json.loads(
+                json.dumps(
+                    response_formatter.error_response(...).dict(),
+                    default=str
+                )
+            )
         )
     
     @staticmethod
