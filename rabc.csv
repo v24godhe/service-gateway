@@ -1,0 +1,38 @@
+1	harold	DCPO.KHKNDHUR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+2	harold	DCPO.OHKORDHR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+3	harold	DCPO.ORKORDRR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+4	harold	DCPO.KRKFAKTR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+5	harold	DCPO.KIINBETR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+6	harold	DCPO.LHLEVHUR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+7	harold	DCPO.AHARTHUR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+8	harold	EGU.AYARINFR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+9	harold	EGU.WSOUTSAM			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+10	harold	EGU.WSSTSFLR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+11	harold	EGU.WSRESULR			1	SYSTEM	2025-10-06 15:11:01.497			CEO - Full access
+12	lars	DCPO.KHKNDHUR			1	SYSTEM	2025-10-06 15:11:01.497			Finance - Customer data
+13	lars	DCPO.OHKORDHR		["OHBLF"]	1	SYSTEM	2025-10-06 15:11:01.497			Finance - Orders, no list price
+14	lars	DCPO.ORKORDRR		["ORPRS"]	1	SYSTEM	2025-10-06 15:11:01.497			Finance - Order rows, no unit price
+15	lars	DCPO.KRKFAKTR			1	SYSTEM	2025-10-06 15:11:01.497			Finance - Invoices
+16	lars	DCPO.KIINBETR			1	SYSTEM	2025-10-06 15:11:01.497			Finance - Payments
+17	lars	DCPO.LHLEVHUR			1	SYSTEM	2025-10-06 15:11:01.497			Finance - Deliveries
+18	lars	EGU.AYARINFR			1	SYSTEM	2025-10-06 15:11:01.497			Finance - Articles
+19	lars	EGU.WSOUTSAM			1	SYSTEM	2025-10-06 15:11:01.497			Finance - Web orders
+20	peter	DCPO.KHKNDHUR		["KHKGŽ"]	1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Customers, no credit limit
+21	peter	DCPO.OHKORDHR		["OHBLF"]	1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Orders, no list price
+22	peter	DCPO.ORKORDRR		["ORPRS"]	1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Order rows, no unit price
+23	peter	DCPO.LHLEVHUR			1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Deliveries
+24	peter	DCPO.AHARTHUR			1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Suppliers
+25	peter	EGU.AYARINFR			1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Articles
+26	peter	EGU.WSSTSFLR			1	SYSTEM	2025-10-06 15:11:01.497			Logistics - Stock
+27	linda	DCPO.KHKNDHUR		["KHKGŽ"]	1	SYSTEM	2025-10-06 15:11:01.497			CS - Customers, no credit
+28	linda	DCPO.OHKORDHR		["OHBLF"]	1	SYSTEM	2025-10-06 15:11:01.497			CS - Orders, no pricing
+29	linda	DCPO.ORKORDRR		["ORPRS"]	1	SYSTEM	2025-10-06 15:11:01.497			CS - Order rows, no pricing
+30	linda	DCPO.KRKFAKTR			1	SYSTEM	2025-10-06 15:11:01.497			CS - Invoices
+31	linda	EGU.WSOUTSAM			1	SYSTEM	2025-10-06 15:11:01.497			CS - Web orders
+32	pontus	DCPO.KHKNDHUR	["KHKNR","KHFKN","KHTEL","KHFA1","KHFA2","KHFA3","KHFA4"]		1	SYSTEM	2025-10-06 15:11:01.500			Call Center - Basic customer info only
+33	pontus	DCPO.OHKORDHR	["OHONR","OHKNR","OHDAO","OHDAL","OHSTS"]		1	SYSTEM	2025-10-06 15:11:01.500			Call Center - Basic order info
+34	pontus	EGU.WSOUTSAM			1	SYSTEM	2025-10-06 15:11:01.500			Call Center - Web orders
+39	call_center	DCPO.OHKORDHR	["KRBLF"]		1	superadmin	2025-10-07 08:22:22.743	superadmin	2025-10-07 08:33:36.117	
+40	pontus	DCPO.ORKORDRR			1	superadmin	2025-10-07 08:23:36.400			
+41	pontus	DCPO.KRKFAKTR			1	superadmin	2025-10-07 08:27:07.197			
+42	call_center	DCPO.ORKORDRR			1	superadmin	2025-10-07 08:33:38.163			
