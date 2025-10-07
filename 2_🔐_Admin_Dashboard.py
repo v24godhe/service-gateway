@@ -247,6 +247,34 @@ with st.sidebar:
             label_visibility="collapsed"
         )
 
+def memory_management_section():
+    """Admin section for managing conversation memories"""
+    st.markdown("## 🧠 Conversation Memory Management")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Memory Statistics")
+        st.info("**Phase 2C Implementation:**")
+        st.write("- Conversation memory active")
+        st.write("- Context-aware SQL generation")
+        st.write("- Follow-up question handling")
+        
+        if st.button("📊 View Memory Usage Stats"):
+            st.info("Memory statistics feature - Implementation in progress")
+    
+    with col2:
+        st.subheader("Memory Operations")
+        if st.button("🗑️ Clear All User Memories", type="secondary"):
+            if st.checkbox("⚠️ Confirm: Clear all conversation memories"):
+                st.success("All conversation memories would be cleared (Feature in development)")
+        
+        if st.button("💾 Export Memory Data"):
+            st.info("Export functionality - Phase 2C implementation")
+        
+        if st.button("🔄 Reset Memory Services"):
+            st.info("Memory service reset - Phase 2C implementation")
+
 # Main content
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -270,6 +298,22 @@ else:
     # Page routing
     if 'page' not in locals():
         page = "📋 Pending Requests"
+
+
+    # Find this line (around line 265):
+    page = st.radio(
+        "Select Page",
+        ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History"],
+        label_visibility="collapsed"
+    )
+
+    # REPLACE IT WITH:
+    page = st.radio(
+        "Select Page",
+        ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History", "🧠 Memory Management"],
+        label_visibility="collapsed"
+    )
+
     
     # ================================================================
     # PAGE 1: Pending Requests
@@ -471,3 +515,10 @@ else:
                     st.markdown("---")
         else:
             st.info("No requests found")
+
+
+    # ================================================================
+    # PAGE 5: Memory Management
+    # ================================================================
+    elif page == "🧠 Memory Management":
+        memory_management_section()

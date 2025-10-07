@@ -125,6 +125,8 @@ with col1:
             <li>Role-based permissions</li>
             <li>Conversation memory</li>
             <li>Export to PDF/Excel</li>
+            <li>Conversation memory & context</li>
+            <li>Follow-up question handling</li>
         </ul>
     </div>
     """, unsafe_allow_html=True)

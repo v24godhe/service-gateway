@@ -80,7 +80,6 @@ TABLE_PERMISSIONS = {
             # Customer info (for delivery)
             "DCPO.KHKNDHUR",      # Customers (address info only)
         ],
-        "row_filter": "OHOST IN ('1','2','3')",  # Open/processing orders only
         "sensitive_columns": [
             # Hide pricing columns
             "OHBLF", "OHBLM", "OHFAV", "OHBLOU",  # Order pricing

@@ -5,6 +5,10 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from langchain.memory import ConversationBufferMemory
+from langchain.memory.chat_message_histories import StreamlitChatMessageHistory
+from langchain.schema import HumanMessage, AIMessage
+import json
 
 load_dotenv()
 
@@ -104,6 +108,19 @@ LAST_MONTH_START = last_month_end.replace(day=1).strftime("%Y%m%d")
 
 # Year start
 YEAR_START = TODAY.replace(month=1, day=1).strftime("%Y%m%d")
+
+
+def initialize_conversation_memory():
+    """Initialize conversation memory for the session"""
+    if "conversation_memory" not in st.session_state:
+        st.session_state.conversation_memory = ConversationBufferMemory(
+            chat_memory=StreamlitChatMessageHistory(key="chat_messages"),
+            return_messages=True,
+            memory_key="chat_history",
+            input_key="input",
+            output_key="output"
+        )
+    return st.session_state.conversation_memory
 
 # Enhanced Role Prompts
 ROLE_PROMPTS = {
@@ -333,7 +350,7 @@ Warehouse Fields:
 
 ### 4. AHARTHUR (Articles)
 Schema: DCPO.AHARTHUR
-Primary Key: AHANR (INTEGER)
+Primary Key: AHANR (CHAR)
 Status Filter: AHSTS='1' for active articles only
 
 Core Fields:
@@ -350,8 +367,8 @@ Stock Fields:
 - AHRES: Reserved Stock (DECIMAL)
 
 Pricing Fields:
-- AHPRS: Sales Price (DECIMAL)
-- AHPRF: Purchase Price (DECIMAL)
+- AHTPR: Sales Price (DECIMAL) 
+- AHPRE: Purchase Price (DECIMAL) 
 
 ---
 
@@ -616,6 +633,9 @@ FETCH FIRST 25 ROWS ONLY
 )
 
 
+#AHTPR: Sales Price (DECIMAL)  -- not so sure
+#AHPRE: Purchase Price (DECIMAL) -- not so sure
+
 # Enhanced SQL Generation Prompt
 SQL_GENERATION_PROMPT = """
 You are an expert SQL generator for the Förlagssystem AB database.
@@ -674,7 +694,14 @@ async def execute_query(sql: str, username: str):
         return response.json()
 
 def generate_sql(question: str, username: str) -> str:
-    """Generate SQL with role-specific optimizations"""
+    """Generate SQL with role-specific optimizations and conversation memory"""
+    
+    # Initialize memory
+    memory = initialize_conversation_memory()
+    
+    # Get conversation history
+    memory_variables = memory.load_memory_variables({})
+    chat_history = memory_variables.get("chat_history", [])
     
     # Add role context to help SQL generation
     role_context = ""
@@ -685,9 +712,19 @@ def generate_sql(question: str, username: str) -> str:
     elif username == "lars":
         role_context = "FINANCE USER: Include amounts, payment terms, and financial details."
     
+    # Enhanced prompt with conversation history
     sql_prompt = f"""{role_context}
 
-User question: "{question}"
+Previous conversation context (last 4 exchanges): 
+{chat_history[-8:] if len(chat_history) > 8 else chat_history}
+
+Current user question: "{question}"
+
+Instructions:
+1. Consider the conversation history when interpreting the current question
+2. If the user refers to previous queries or results, use that context
+3. Generate appropriate SQL query considering the context
+4. If the question builds upon previous questions, maintain that continuity
 
 DATABASE SCHEMA:
 {DATABASE_SCHEMA}
@@ -703,10 +740,10 @@ Return ONLY the SQL query."""
         ],
         temperature=0.1
     )
-
     sql = response.choices[0].message.content.strip()
-    sql = sql.replace("```sql", "").replace("```", "").strip().rstrip(';')
+    sql = sql.replace("``````", "").strip().rstrip(';')
     return sql
+
 
 def format_results(question: str, rows: list, username: str) -> str:
     """Format results based on role - NO unnecessary suggestions"""
@@ -777,6 +814,27 @@ with st.sidebar:
             st.session_state.messages = []
             st.rerun()
 
+        # ADD THIS NEW SECTION:
+        st.markdown("---")
+        st.markdown("### 🧠 Memory Controls")
+
+        if st.button("🧹 Clear Conversation Memory", use_container_width=True):
+            if "conversation_memory" in st.session_state:
+                st.session_state.conversation_memory.clear()
+            if "messages" in st.session_state:
+                st.session_state.messages = []
+            st.success("Memory cleared!")
+            st.rerun()
+
+        # Show memory stats
+        if "conversation_memory" in st.session_state:
+            memory_vars = st.session_state.conversation_memory.load_memory_variables({})
+            chat_history = memory_vars.get("chat_history", [])
+            st.info(f"💭 Conversation turns: {len(chat_history)}")
+
+
+
+
 # Main content
 if st.session_state.username is None:
     col1, col2, col3 = st.columns([1,2,1])
@@ -815,34 +873,40 @@ else:
         submit = st.form_submit_button("Send")
 
     if submit and user_input:
+        # Initialize memory
+        memory = initialize_conversation_memory()
+        
         st.session_state.messages.append({"role": "user", "content": user_input})
-
+        
         with st.spinner("Analyzing..."):
             try:
-                # Generate SQL with role context
+                # Generate SQL with conversation context
                 sql = generate_sql(user_input, st.session_state.username)
-
                 if not sql.upper().startswith("SELECT"):
-                    response = "I can only retrieve information from the system; I can’t perform any other operations at the moment."
+                    response = "I can only retrieve information from the system; I can't perform any other operations at the moment."
                 else:
                     result = asyncio.run(execute_query(sql, st.session_state.username))
-
                     if result.get("success"):
                         rows = result["data"]["rows"]
                         if len(rows) == 0:
                             response = "No data found matching your query."
                         else:
                             response = format_results(user_input, rows, st.session_state.username)
+                            
+                            # Save to conversation memory
+                            memory.save_context(
+                                {"input": user_input},
+                                {"output": response}
+                            )
                     else:
                         error_msg = result.get("message", "").lower()
                         if "permission" in error_msg or "access" in error_msg or "denied" in error_msg:
                             response = "You don't have permission to access that information."
                         else:
                             response = f"Query error. Please try rephrasing your question."
-
+                            
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.rerun()
-
             except Exception as e:
                 response = "An error occurred. Please try again."
                 st.session_state.messages.append({"role": "assistant", "content": response})

@@ -223,7 +223,7 @@ async def search_customers(
 @app.post("/api/execute-query")
 async def execute_query(query_request: DynamicQueryRequest, request: Request):
     """Execute dynamic SQL query with conversation memory"""
-    
+    print("Query captured at API:", query_request.query)
     # Get username from header
     username = request.headers.get("X-Username")
     if not username:

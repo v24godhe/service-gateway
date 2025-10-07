@@ -8,3 +8,7 @@
 44	REQUEST_CREATED	24		pontus	SYSTEM	{"table":"DCPO.ORKORDRR","question":"Access attempted: SELECT \n    o.OHONR AS OrderNumber,\n    c.KHFKN AS CustomerName,\n    SUM(r.ORKVL) AS QuantityDelivered,\n    o.OHBLF AS InvoiceAmount,\n    o.OHVAL AS Currency\nFROM \n    DCPO.OHKORDHR o\nINNER JOIN \n    "}		2025-10-07 08:33:02.070
 45	REQUEST_APPROVED	23		call_center	superadmin	{"table":"DCPO.OHKORDHR","notes":""}		2025-10-07 08:33:36.120
 46	REQUEST_APPROVED	24		call_center	superadmin	{"table":"DCPO.ORKORDRR","notes":""}		2025-10-07 08:33:38.163
+47	REQUEST_CREATED	25		lars	SYSTEM	{"table":"DCPO.AHARTHUR","question":"Access attempted: SELECT \n    a.AHANR AS Article_Number,\n    a.AHBES AS Article_Name,\n    ay.AYTIT AS Title,\n    ay.AYFô AS Author,\n    ay.AYILL AS Illustrator,\n    ay.AYBIN AS Binding,\n    ay.AYTRè AS Year\nFROM \n    D"}		2025-10-07 10:33:58.283
+48	REQUEST_APPROVED	25		finance	superadmin	{"table":"DCPO.AHARTHUR","notes":""}		2025-10-07 10:49:37.247
+49	REQUEST_CREATED	26		lars	SYSTEM	{"table":"EGU.AYARINFR","question":"Access attempted: SELECT \n    a.AHANR AS Article_Number,\n    a.AHBES AS Article_Name,\n    ay.AYTIT AS Title,\n    ay.AYFô AS Author,\n    SUM(r.ORKVB) AS Total_Ordered,\n    SUM(r.ORKVL) AS Total_Delivered,\n    o.OHBLF AS"}		2025-10-07 10:49:51.050
+50	REQUEST_APPROVED	26		finance	superadmin	{"table":"EGU.AYARINFR","notes":""}		2025-10-07 10:50:43.340
