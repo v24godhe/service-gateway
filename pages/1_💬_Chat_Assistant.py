@@ -294,12 +294,12 @@ def save_message_to_database(role: str, content: str, metadata: dict = None):
         return False
     
     try:
-        success = db_memory_service.save_message(
+        success = asyncio.run(db_memory_service.save_message(
             session_id=st.session_state.session_id,
             message_type=role,
             message_content=content,
             message_metadata=json.dumps(metadata) if metadata else None
-        )
+        ))
         
         if not success:
             st.sidebar.error("⚠️ Failed to save message to database")
@@ -321,13 +321,13 @@ def update_conversation_context(user_question: str, generated_sql: str, tables_u
         return False
     
     try:
-        success = db_memory_service.update_conversation_context(
+        success = asyncio.run(db_memory_service.update_conversation_context(
             session_id=st.session_state.session_id,
             last_query=user_question,
             last_sql=generated_sql,
             last_tables_used=tables_used,
             result_count=result_count
-        )
+        ))
         return success
     except Exception as e:
         st.sidebar.error(f"⚠️ Context update error: {str(e)}")
@@ -1035,7 +1035,7 @@ with st.sidebar:
                 try:
                     # Clear from database
                     if db_memory_service and 'session_id' in st.session_state:
-                        success = db_memory_service.clear_session_messages(st.session_state.session_id)
+                        success = asyncio.run(db_memory_service.clear_session_messages(st.session_state.session_id))
                         if success:
                             st.success("✅ DB cleared")
                         else:
@@ -1067,7 +1067,7 @@ with st.sidebar:
         # Show memory stats
         try:
             if db_memory_service and 'session_id' in st.session_state:
-                message_count = len(db_memory_service.get_session_messages(st.session_state.session_id))
+                message_count = len(asyncio.run(db_memory_service.get_session_messages(st.session_state.session_id)))
                 st.metric("DB Messages", message_count)
             
             if "conversation_memory" in st.session_state:
