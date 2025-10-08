@@ -5,8 +5,8 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from langchain.memory import ConversationBufferMemory
-from langchain.memory.chat_message_histories import StreamlitChatMessageHistory
 from langchain.schema import HumanMessage, AIMessage
 import json
 
@@ -777,7 +777,7 @@ Present the answer now:"""
 # Sidebar
 with st.sidebar:
     st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg",
-             use_container_width=True)
+             width=True)
     st.markdown("---")
 
     if st.session_state.username is None:
@@ -795,7 +795,7 @@ with st.sidebar:
             }[x]
         )
 
-        if st.button("Login", use_container_width=True):
+        if st.button("Login", width=True):
             if username:
                 st.session_state.username = username
                 st.session_state.messages = []
@@ -809,7 +809,7 @@ with st.sidebar:
         st.markdown(f"**Today:** {TODAY.strftime('%B %d, %Y')}")
         st.markdown(f"**This Week:** {datetime.strptime(WEEK_START, '%Y%m%d').strftime('%b %d')} - {datetime.strptime(WEEK_END, '%Y%m%d').strftime('%b %d')}")
 
-        if st.button("Logout", use_container_width=True):
+        if st.button("Logout", width=True):
             st.session_state.username = None
             st.session_state.messages = []
             st.rerun()
@@ -818,7 +818,7 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("### 🧠 Memory Controls")
 
-        if st.button("🧹 Clear Conversation Memory", use_container_width=True):
+        if st.button("🧹 Clear Conversation Memory", width=True):
             if "conversation_memory" in st.session_state:
                 st.session_state.conversation_memory.clear()
             if "messages" in st.session_state:
@@ -840,7 +840,7 @@ if st.session_state.username is None:
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
-                 use_container_width=True)
+                 width=True)
         st.markdown("<h1 style='text-align: center;'>AI Assistant</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666;'>Select your account to get started</p>",
                    unsafe_allow_html=True)
@@ -877,11 +877,12 @@ else:
         memory = initialize_conversation_memory()
         
         st.session_state.messages.append({"role": "user", "content": user_input})
-        
+        print("DEBUG: User question =", user_input)
         with st.spinner("Analyzing..."):
             try:
                 # Generate SQL with conversation context
                 sql = generate_sql(user_input, st.session_state.username)
+                print(f"DEBUG: Generated SQL = {sql}")
                 if not sql.upper().startswith("SELECT"):
                     response = "I can only retrieve information from the system; I can't perform any other operations at the moment."
                 else:
