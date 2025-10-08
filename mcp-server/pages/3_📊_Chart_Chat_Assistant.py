@@ -31,7 +31,7 @@ if prompt := st.chat_input("Ask for a business insight or chart..."):
     sql_query = generate_sql(prompt, user_role)
     # Pass sql_query to your underlying chart/DB logic as needed
 
-    chart_handled = integrate_with_existing_chat(chat_integration, prompt, user_role=user_role)
+    chart_handled = integrate_with_existing_chat(chat_integration, sql_query, user_role=user_role)
     if not chart_handled:
         with st.chat_message("assistant"):
             out = f"I understand you said: '{prompt}'. Try asking for a chart, e.g., 'Show me monthly revenue.'"
