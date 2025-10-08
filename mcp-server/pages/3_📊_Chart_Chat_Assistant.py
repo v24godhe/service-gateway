@@ -1,19 +1,21 @@
 import streamlit as st
+
+from utils.text_to_sql_converter import get_env_variable, generate_sql,  ROLE_PROMPTS
+
 from utils.chat_chart_integration import ChatChartIntegration, integrate_with_existing_chat
+
+OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY")
 
 st.set_page_config(page_title="Chart Chat Assistant", layout="wide")
 st.title("📊 Chart Chat Assistant")
 
-# Initialize the chart chat system
 chat_integration = ChatChartIntegration(fastapi_base_url="http://10.200.0.2:8080")
 
-# Optional: You could authenticate user/role here
-user_role = "CEO"
+user_role = "harold"
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
@@ -24,6 +26,11 @@ if prompt := st.chat_input("Ask for a business insight or chart..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
+
+    # Optionally use SQL from prompt for chart creation:
+    sql_query = generate_sql(prompt, user_role)
+    # Pass sql_query to your underlying chart/DB logic as needed
+
     chart_handled = integrate_with_existing_chat(chat_integration, prompt, user_role=user_role)
     if not chart_handled:
         with st.chat_message("assistant"):
