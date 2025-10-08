@@ -253,17 +253,17 @@ def initialize_chat_session():
     # Initialize database session
     try:
         # Create session in database
-        session_created = db_memory_service.create_session(
+        session_created = asyncio.run(db_memory_service.create_session(
             session_id=st.session_state.session_id,
             user_id=st.session_state.user_id,
             metadata={"started_at": datetime.now().isoformat()}
-        )
+        ))
         
         if session_created:
             st.sidebar.success("✅ Database session initialized")
         
         # Load existing conversation history from database
-        messages = db_memory_service.get_session_messages(st.session_state.session_id)
+        messages = asyncio.run(db_memory_service.get_session_messages(st.session_state.session_id))
         
         # Convert database messages to Streamlit format
         if messages and len(messages) > 0:
