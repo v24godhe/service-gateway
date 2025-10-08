@@ -1059,6 +1059,20 @@ else:
                                 {"input": user_input},
                                 {"output": response}
                             )
+                            # UPDATE CONVERSATION CONTEXT IN DATABASE - ADD THIS BLOCK
+                            if sql and sql.strip().upper().startswith("SELECT"):
+                                # Extract table names from SQL (simple extraction)
+                                tables_used = ""
+                                try:
+                                    if "FROM" in sql.upper():
+                                        sql_parts = sql.upper().split("FROM")[1].split("WHERE")[0].split("ORDER")[0].split("GROUP")[0]
+                                        tables_used = sql_parts.strip()[:200]  # Limit length
+                                except:
+                                    tables_used = "UNKNOWN"
+                                
+                                result_count = len(rows) if rows else 0
+                                update_conversation_context(user_input, sql, tables_used, result_count)
+                            # END OF ADDED BLOCK
                     else:
                         error_msg = result.get("message", "").lower()
                         if "permission" in error_msg or "access" in error_msg or "denied" in error_msg:
