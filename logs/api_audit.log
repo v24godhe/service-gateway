@@ -524,3 +524,7 @@
 2025-10-08 10:59:15 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-08T10:59:15.654015", "service": "Service Gateway"}
 2025-10-08 10:59:25 | INFO | {"event": "service_startup", "timestamp": "2025-10-08T10:59:25.319593", "service": "Service Gateway"}
 2025-10-08 11:02:55 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-08T11:02:55.481463", "service": "Service Gateway"}
+2025-10-08 11:03:10 | INFO | {"event": "service_startup", "timestamp": "2025-10-08T11:03:10.839271", "service": "Service Gateway"}
+2025-10-08 11:04:09 | INFO | {"request_id": "cb6112e9-8d9f-45e2-af9b-31e92fbc2538", "timestamp": "2025-10-08T11:04:09.637106", "operation_type": "SELECT", "table_name": null, "query": "SELECT \n    k.KHKNR AS Customer_Number,\n    k.KHFKN AS Customer_Name,\n    k.KHFA1 AS Address_Line_1,\n    k.KHFA2 AS Address_Line_2,\n    k.KHFA3 AS Address_Line_3,\n    k.KHFA4 AS Address_Line_4,\n    k.KHTEL AS Telephone,\n    k.KHKON AS Contact_Person,\n    k.KHKG\u00c4 AS Credit_Limit,\n    k.KHBLE AS Balance,\n    k.KHSAL AS Outstanding_Balance\nFROM DCPO.KHKNDHUR k\nWHERE k.KHKNR = 330\n  AND k.KHSTS = '1'", "execution_time_ms": 19.291400909423828, "row_count": 1, "success": true, "error": null}
+2025-10-08 13:01:22 | INFO | {"event": "service_startup", "timestamp": "2025-10-08T13:01:22.987295", "service": "Service Gateway"}
+2025-10-08 14:35:34 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-08T14:35:34.854019", "service": "Service Gateway"}
