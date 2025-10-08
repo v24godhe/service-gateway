@@ -9,6 +9,8 @@ from langchain_community.chat_message_histories import StreamlitChatMessageHisto
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 import json
+from services.persistent_memory_service import PersistentMemoryService
+import os
 
 load_dotenv()
 
@@ -695,54 +697,46 @@ async def execute_query(sql: str, username: str):
 
 def generate_sql(question: str, username: str) -> str:
     """Generate SQL with role-specific optimizations and conversation memory"""
-    
-    # Initialize memory
-    memory = initialize_conversation_memory()
-    
-    # Get conversation history
-    memory_variables = memory.load_memory_variables({})
-    chat_history = memory_variables.get("chat_history", [])
-    
-    # Add role context to help SQL generation
-    role_context = ""
-    if username == "peter":
-        role_context = "LOGISTICS USER: Include quantities, item counts, and article details."
-    elif username == "harold":
-        role_context = "CEO USER: Focus on revenue, totals, and strategic metrics."
-    elif username == "lars":
-        role_context = "FINANCE USER: Include amounts, payment terms, and financial details."
-    
-    # Enhanced prompt with conversation history
-    sql_prompt = f"""{role_context}
-
+    try:
+        memory = initialize_conversation_memory()
+        memory_variables = memory.load_memory_variables({})
+        chat_history = memory_variables.get("chat_history", [])
+        role_context = ""
+        if username == "peter":
+            role_context = "LOGISTICS USER: Include quantities, item counts, and article details."
+        elif username == "harold":
+            role_context = "CEO USER: Focus on revenue, totals, and strategic metrics."
+        elif username == "lars":
+            role_context = "FINANCE USER: Include amounts, payment terms, and financial details."
+        sql_prompt = f"""{role_context}
 Previous conversation context (last 4 exchanges): 
 {chat_history[-8:] if len(chat_history) > 8 else chat_history}
-
 Current user question: "{question}"
-
 Instructions:
-1. Consider the conversation history when interpreting the current question
-2. If the user refers to previous queries or results, use that context
-3. Generate appropriate SQL query considering the context
-4. If the question builds upon previous questions, maintain that continuity
-
+1. Consider the conversation history ...
 DATABASE SCHEMA:
 {DATABASE_SCHEMA}
-
 Generate SQL following the rules in the system prompt. Include JOINs for comprehensive data.
 Return ONLY the SQL query."""
+        print("DEBUG: About to call OpenAI with the following prompt:")
+        #print(sql_prompt)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": SQL_GENERATION_PROMPT},
+                {"role": "user", "content": sql_prompt}
+            ],
+            temperature=0.1
+        )
+        sql = response.choices[0].message.content.strip()
+        print(f"DEBUG: Raw OpenAI response: {sql}")
+        sql = sql.replace("``````", "").strip().rstrip(';')
+        print(f"DEBUG: Processed SQL = {sql}")
+        return sql
+    except Exception as e:
+        print(f"ERROR in generate_sql: {repr(e)}")
+        return ""
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": SQL_GENERATION_PROMPT},
-            {"role": "user", "content": sql_prompt}
-        ],
-        temperature=0.1
-    )
-    sql = response.choices[0].message.content.strip()
-    sql = sql.replace("``````", "").strip().rstrip(';')
-    return sql
 
 
 def format_results(question: str, rows: list, username: str) -> str:
@@ -833,7 +827,14 @@ with st.sidebar:
             st.info(f"💭 Conversation turns: {len(chat_history)}")
 
 
-
+def clean_sql_output(sql: str) -> str:
+    """
+    Cleans AI-generated SQL by removing markdown fences and extra formatting.
+    """
+    if not sql:
+        return ""
+    sql = sql.replace("```sql", "").replace("```", "").strip()
+    return sql
 
 # Main content
 if st.session_state.username is None:
@@ -881,9 +882,9 @@ else:
         with st.spinner("Analyzing..."):
             try:
                 # Generate SQL with conversation context
-                sql = generate_sql(user_input, st.session_state.username)
+                sql = clean_sql_output(generate_sql(user_input, st.session_state.username))
                 print(f"DEBUG: Generated SQL = {sql}")
-                if not sql.upper().startswith("SELECT"):
+                if not sql.strip().upper().startswith("SELECT"):
                     response = "I can only retrieve information from the system; I can't perform any other operations at the moment."
                 else:
                     result = asyncio.run(execute_query(sql, st.session_state.username))
