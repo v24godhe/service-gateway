@@ -12,6 +12,11 @@ import json
 from services.persistent_memory_service import PersistentMemoryService
 import os
 
+
+from services.conversation_memory_service import ConversationMemoryService
+import uuid
+from datetime import datetime
+
 load_dotenv()
 
 st.set_page_config(
@@ -92,6 +97,20 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GATEWAY_URL = os.getenv("GATEWAY_URL")
 GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN")
 
+@st.cache_resource
+def get_database_memory_services():
+    """Initialize database memory services - cached to avoid recreating"""
+    try:
+        persistent_service = PersistentMemoryService()
+        conversation_service = ConversationMemoryService(persistent_service)
+        return persistent_service, conversation_service
+    except Exception as e:
+        st.error(f"Failed to initialize database services: {str(e)}")
+        return None, None
+
+# Get memory services
+db_memory_service, conversation_memory_service = get_database_memory_services()
+
 # Get current date for queries
 TODAY = datetime(2025, 9, 10)
 TODAY_STR = TODAY.strftime("%Y%m%d")
@@ -123,6 +142,103 @@ def initialize_conversation_memory():
             output_key="output"
         )
     return st.session_state.conversation_memory
+
+def initialize_chat_session():
+    """Initialize or restore chat session with database integration"""
+    
+    # Generate session ID if not exists
+    if 'session_id' not in st.session_state:
+        st.session_state.session_id = str(uuid.uuid4())
+        st.session_state.user_id = st.session_state.username if st.session_state.username else "default_user"
+    
+    # Skip database operations if service is not available
+    if not db_memory_service:
+        st.warning("⚠️ Database memory service not available - using session memory only")
+        return
+    
+    # Initialize database session
+    try:
+        # Create session in database
+        session_created = db_memory_service.create_session(
+            session_id=st.session_state.session_id,
+            user_id=st.session_state.user_id,
+            metadata={"started_at": datetime.now().isoformat()}
+        )
+        
+        if session_created:
+            st.sidebar.success("✅ Database session initialized")
+        
+        # Load existing conversation history from database
+        messages = db_memory_service.get_session_messages(st.session_state.session_id)
+        
+        # Convert database messages to Streamlit format
+        if messages and len(messages) > 0:
+            st.session_state.messages = []
+            for msg in messages:
+                st.session_state.messages.append({
+                    "role": msg['message_type'],
+                    "content": msg['message_content'],
+                    "timestamp": msg.get('timestamp', '')
+                })
+            st.sidebar.info(f"📚 Loaded {len(messages)} messages from database")
+    
+    except Exception as e:
+        st.sidebar.error(f"❌ Database initialization error: {str(e)}")
+        # Fall back to session-only memory
+        if 'messages' not in st.session_state:
+            st.session_state.messages = []
+
+def save_message_to_database(role: str, content: str, metadata: dict = None):
+    """Save message to database with error handling"""
+    
+    # Skip if database service not available
+    if not db_memory_service:
+        return False
+        
+    # Skip if no session_id
+    if 'session_id' not in st.session_state:
+        return False
+    
+    try:
+        success = db_memory_service.save_message(
+            session_id=st.session_state.session_id,
+            message_type=role,
+            message_content=content,
+            message_metadata=json.dumps(metadata) if metadata else None
+        )
+        
+        if not success:
+            st.sidebar.error("⚠️ Failed to save message to database")
+            return False
+        
+        # Update session activity
+        db_memory_service.update_session_activity(st.session_state.session_id)
+        return True
+        
+    except Exception as e:
+        st.sidebar.error(f"❌ Database save error: {str(e)}")
+        return False
+
+def update_conversation_context(user_question: str, generated_sql: str, tables_used: str = "", result_count: int = 0):
+    """Update conversation context in database"""
+    
+    # Skip if database service not available
+    if not db_memory_service or 'session_id' not in st.session_state:
+        return False
+    
+    try:
+        success = db_memory_service.update_conversation_context(
+            session_id=st.session_state.session_id,
+            last_query=user_question,
+            last_sql=generated_sql,
+            last_tables_used=tables_used,
+            result_count=result_count
+        )
+        return success
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Context update error: {str(e)}")
+        return False
+
 
 # Enhanced Role Prompts
 ROLE_PROMPTS = {
@@ -793,6 +909,7 @@ with st.sidebar:
             if username:
                 st.session_state.username = username
                 st.session_state.messages = []
+                initialize_chat_session()  # ADD THIS LINE
                 st.rerun()
     else:
         st.markdown(f"### Logged in as")
@@ -812,19 +929,60 @@ with st.sidebar:
         st.markdown("---")
         st.markdown("### 🧠 Memory Controls")
 
-        if st.button("🧹 Clear Conversation Memory", width=True):
-            if "conversation_memory" in st.session_state:
-                st.session_state.conversation_memory.clear()
-            if "messages" in st.session_state:
-                st.session_state.messages = []
-            st.success("Memory cleared!")
-            st.rerun()
+        # Show session info
+        if 'session_id' in st.session_state:
+            st.info(f"**Session:** {st.session_state.session_id[:8]}...")
+
+        # Memory control buttons
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("🗑️ Clear Session", width=True):
+                try:
+                    # Clear from database
+                    if db_memory_service and 'session_id' in st.session_state:
+                        success = db_memory_service.clear_session_messages(st.session_state.session_id)
+                        if success:
+                            st.success("✅ DB cleared")
+                        else:
+                            st.error("❌ DB clear failed")
+                    
+                    # Clear local memory
+                    if "conversation_memory" in st.session_state:
+                        st.session_state.conversation_memory.clear()
+                    if "messages" in st.session_state:
+                        st.session_state.messages = []
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Clear error: {str(e)}")
+
+        with col2:
+            if st.button("📱 New Session", width=True):
+                try:
+                    # Start new session
+                    st.session_state.session_id = str(uuid.uuid4())
+                    st.session_state.messages = []
+                    if "conversation_memory" in st.session_state:
+                        st.session_state.conversation_memory.clear()
+                    initialize_chat_session()
+                    st.success("✅ New session")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"New session error: {str(e)}")
 
         # Show memory stats
-        if "conversation_memory" in st.session_state:
-            memory_vars = st.session_state.conversation_memory.load_memory_variables({})
-            chat_history = memory_vars.get("chat_history", [])
-            st.info(f"💭 Conversation turns: {len(chat_history)}")
+        try:
+            if db_memory_service and 'session_id' in st.session_state:
+                message_count = len(db_memory_service.get_session_messages(st.session_state.session_id))
+                st.metric("DB Messages", message_count)
+            
+            if "conversation_memory" in st.session_state:
+                memory_vars = st.session_state.conversation_memory.load_memory_variables({})
+                chat_history = memory_vars.get("chat_history", [])
+                st.metric("Memory Turns", len(chat_history))
+        except Exception as e:
+            st.error(f"Stats error: {str(e)}")
+
 
 
 def clean_sql_output(sql: str) -> str:
@@ -878,6 +1036,7 @@ else:
         memory = initialize_conversation_memory()
         
         st.session_state.messages.append({"role": "user", "content": user_input})
+        save_message_to_database("user", user_input) 
         print("DEBUG: User question =", user_input)
         with st.spinner("Analyzing..."):
             try:
@@ -908,6 +1067,7 @@ else:
                             response = f"Query error. Please try rephrasing your question."
                             
                 st.session_state.messages.append({"role": "assistant", "content": response})
+                save_message_to_database("assistant", response)
                 st.rerun()
             except Exception as e:
                 response = "An error occurred. Please try again."
