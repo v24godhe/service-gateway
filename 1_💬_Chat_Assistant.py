@@ -9,11 +9,7 @@ from langchain_community.chat_message_histories import StreamlitChatMessageHisto
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import HumanMessage, AIMessage
 import json
-from services.persistent_memory_service import PersistentMemoryService
 import os
-
-
-from services.conversation_memory_service import ConversationMemoryService
 import uuid
 from datetime import datetime
 
@@ -97,19 +93,117 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GATEWAY_URL = os.getenv("GATEWAY_URL")
 GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN")
 
-@st.cache_resource
-def get_database_memory_services():
-    """Initialize database memory services - cached to avoid recreating"""
-    try:
-        persistent_service = PersistentMemoryService()
-        conversation_service = ConversationMemoryService(persistent_service)
-        return persistent_service, conversation_service
-    except Exception as e:
-        st.error(f"Failed to initialize database services: {str(e)}")
-        return None, None
+# Database memory services via FastAPI
+class DatabaseMemoryClient:
+    """Client for database memory operations via FastAPI"""
+    
+    def __init__(self):
+        self.gateway_url = GATEWAY_URL
+        self.gateway_token = GATEWAY_TOKEN
+        
+    async def create_session(self, session_id: str, user_id: str, metadata: dict = None):
+        """Create session via API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.gateway_url}/api/conversation/create-session",
+                    json={
+                        "session_id": session_id,
+                        "user_id": user_id,
+                        "metadata": metadata or {}
+                    },
+                    headers={"Authorization": f"Bearer {self.gateway_token}"},
+                    timeout=10.0
+                )
+                result = response.json()
+                return result.get("success", False)
+        except Exception as e:
+            st.sidebar.error(f"Create session API error: {str(e)}")
+            return False
+            
+    async def save_message(self, session_id: str, message_type: str, message_content: str, message_metadata: str = None):
+        """Save message via API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.gateway_url}/api/conversation/save-message",
+                    json={
+                        "session_id": session_id,
+                        "message_type": message_type,
+                        "message_content": message_content,
+                        "message_metadata": message_metadata
+                    },
+                    headers={"Authorization": f"Bearer {self.gateway_token}"},
+                    timeout=10.0
+                )
+                result = response.json()
+                return result.get("success", False)
+        except Exception as e:
+            st.sidebar.error(f"Save message API error: {str(e)}")
+            return False
+            
+    async def get_session_messages(self, session_id: str):
+        """Get session messages via API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.gateway_url}/api/conversation/get-messages/{session_id}",
+                    headers={"Authorization": f"Bearer {self.gateway_token}"},
+                    timeout=10.0
+                )
+                result = response.json()
+                return result.get("messages", [])
+        except Exception as e:
+            st.sidebar.error(f"Get messages API error: {str(e)}")
+            return []
+            
+    async def update_conversation_context(self, session_id: str, last_query: str, last_sql: str = None, 
+                                        last_tables_used: str = None, result_count: int = 0):
+        """Update conversation context via API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.gateway_url}/api/conversation/update-context",
+                    json={
+                        "session_id": session_id,
+                        "last_query": last_query,
+                        "last_sql": last_sql,
+                        "last_tables_used": last_tables_used,
+                        "result_count": result_count
+                    },
+                    headers={"Authorization": f"Bearer {self.gateway_token}"},
+                    timeout=10.0
+                )
+                result = response.json()
+                return result.get("success", False)
+        except Exception as e:
+            st.sidebar.error(f"Update context API error: {str(e)}")
+            return False
+            
+    async def clear_session_messages(self, session_id: str):
+        """Clear session messages via API"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.delete(
+                    f"{self.gateway_url}/api/conversation/clear-session/{session_id}",
+                    headers={"Authorization": f"Bearer {self.gateway_token}"},
+                    timeout=10.0
+                )
+                result = response.json()
+                return result.get("success", False)
+        except Exception as e:
+            st.sidebar.error(f"Clear session API error: {str(e)}")
+            return False
 
-# Get memory services
-db_memory_service, conversation_memory_service = get_database_memory_services()
+# Initialize API client
+@st.cache_resource
+def get_database_memory_client():
+    """Initialize database memory API client"""
+    return DatabaseMemoryClient()
+
+db_memory_service = get_database_memory_client()
+conversation_memory_service = None  # Not needed anymore
+
 
 # Get current date for queries
 TODAY = datetime(2025, 9, 10)

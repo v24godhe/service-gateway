@@ -609,6 +609,136 @@ async def get_conversation_context(request: Request):
         "context": conversation.get_context_for_query()
     }
 
+
+# ========== DATABASE CONVERSATION MEMORY ENDPOINTS ==========
+
+@app.post("/api/conversation/create-session")
+async def create_conversation_session(
+    session_id: str = Body(...),
+    user_id: str = Body(...),
+    metadata: dict = Body(None)
+):
+    """Create a new conversation session in database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        db_service = PersistentMemoryService()
+        
+        success = db_service.create_session(
+            session_id=session_id,
+            user_id=user_id,
+            metadata=metadata
+        )
+        
+        return {
+            "success": success,
+            "session_id": session_id,
+            "message": "Session created successfully" if success else "Failed to create session"
+        }
+        
+    except Exception as e:
+        logger.error(f"Create session failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conversation/save-message")
+async def save_conversation_message(
+    session_id: str = Body(...),
+    message_type: str = Body(...),
+    message_content: str = Body(...),
+    message_metadata: str = Body(None)
+):
+    """Save a message to database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        db_service = PersistentMemoryService()
+        
+        success = db_service.save_message(
+            session_id=session_id,
+            message_type=message_type,
+            message_content=message_content,
+            message_metadata=message_metadata
+        )
+        
+        return {
+            "success": success,
+            "message": "Message saved successfully" if success else "Failed to save message"
+        }
+        
+    except Exception as e:
+        logger.error(f"Save message failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversation/get-messages/{session_id}")
+async def get_conversation_messages(session_id: str):
+    """Get all messages for a session from database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        db_service = PersistentMemoryService()
+        
+        messages = db_service.get_session_messages(session_id)
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "message_count": len(messages),
+            "messages": messages
+        }
+        
+    except Exception as e:
+        logger.error(f"Get messages failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conversation/update-context")
+async def update_conversation_context(
+    session_id: str = Body(...),
+    last_query: str = Body(...),
+    last_sql: str = Body(None),
+    last_tables_used: str = Body(None),
+    result_count: int = Body(0)
+):
+    """Update conversation context in database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        db_service = PersistentMemoryService()
+        
+        success = db_service.update_conversation_context(
+            session_id=session_id,
+            last_query=last_query,
+            last_sql=last_sql,
+            last_tables_used=last_tables_used,
+            result_count=result_count
+        )
+        
+        return {
+            "success": success,
+            "message": "Context updated successfully" if success else "Failed to update context"
+        }
+        
+    except Exception as e:
+        logger.error(f"Update context failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/conversation/clear-session/{session_id}")
+async def clear_conversation_session(session_id: str):
+    """Clear all messages for a session from database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        db_service = PersistentMemoryService()
+        
+        success = db_service.clear_session_messages(session_id)
+        
+        return {
+            "success": success,
+            "session_id": session_id,
+            "message": "Session cleared successfully" if success else "Failed to clear session"
+        }
+        
+    except Exception as e:
+        logger.error(f"Clear session failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========== END DATABASE CONVERSATION MEMORY ENDPOINTS ==========
+
+
 # Helth Checking
 
 @app.get("/health")

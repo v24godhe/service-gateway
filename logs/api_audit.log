@@ -514,3 +514,7 @@
 2025-10-08 08:46:56 | INFO | {"request_id": "753d600b-9795-45aa-8adf-fc3c88e2626c", "timestamp": "2025-10-08T08:46:56.071382", "operation_type": "SELECT", "table_name": null, "query": "SELECT \n    KHTEL AS Contact_Number\nFROM DCPO.KHKNDHUR\nWHERE KHKNR = 330\n  AND KHSTS = '1'", "execution_time_ms": 16.06440544128418, "row_count": 1, "success": true, "error": null}
 2025-10-08 08:48:30 | INFO | {"request_id": "f3a309d0-ca8c-4ab6-8384-678520cbec34", "timestamp": "2025-10-08T08:48:30.065950", "operation_type": "SELECT", "table_name": null, "query": "SELECT \n    k.KHFKN AS Customer_Name\nFROM DCPO.KHKNDHUR k\nWHERE k.KHKNR = 330\n  AND k.KHSTS = '1'", "execution_time_ms": 29.006004333496094, "row_count": 1, "success": true, "error": null}
 2025-10-08 08:51:09 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-08T08:51:09.428149", "service": "Service Gateway"}
+2025-10-08 10:07:29 | INFO | {"event": "service_startup", "timestamp": "2025-10-08T10:07:29.021753", "service": "Service Gateway"}
+2025-10-08 10:10:38 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-08T10:10:38.065764", "service": "Service Gateway"}
+2025-10-08 10:10:42 | INFO | {"event": "service_startup", "timestamp": "2025-10-08T10:10:42.274574", "service": "Service Gateway"}
+2025-10-08 10:12:24 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-08T10:12:24.770582", "service": "Service Gateway"}
