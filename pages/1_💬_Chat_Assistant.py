@@ -306,7 +306,6 @@ def save_message_to_database(role: str, content: str, metadata: dict = None):
             return False
         
         # Update session activity
-        db_memory_service.update_session_activity(st.session_state.session_id)
         return True
         
     except Exception as e:

@@ -612,6 +612,15 @@ async def get_conversation_context(request: Request):
 
 # ========== DATABASE CONVERSATION MEMORY ENDPOINTS ==========
 
+def get_memory_connection_string():
+    """Get connection string for memory database"""
+    return (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\\\SQLEXPRESS')};"
+        f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+        f"Trusted_Connection=yes;"
+    )
+
 @app.post("/api/conversation/create-session")
 async def create_conversation_session(
     session_id: str = Body(...),
@@ -621,12 +630,13 @@ async def create_conversation_session(
     """Create a new conversation session in database"""
     try:
         from services.persistent_memory_service import PersistentMemoryService
-        db_service = PersistentMemoryService()
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
         
-        success = db_service.create_session(
+        # Use create_or_get_session (not create_session)
+        success = db_service.create_or_get_session(
             session_id=session_id,
-            user_id=user_id,
-            metadata=metadata
+            user_id=user_id
         )
         
         return {
@@ -649,13 +659,18 @@ async def save_conversation_message(
     """Save a message to database"""
     try:
         from services.persistent_memory_service import PersistentMemoryService
-        db_service = PersistentMemoryService()
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
         
+        # Convert metadata from string to dict if provided
+        metadata_dict = json.loads(message_metadata) if message_metadata else None
+        
+        # Use correct parameter name 'content' not 'message_content'
         success = db_service.save_message(
             session_id=session_id,
             message_type=message_type,
-            message_content=message_content,
-            message_metadata=message_metadata
+            content=message_content,
+            metadata=metadata_dict
         )
         
         return {
@@ -672,15 +687,27 @@ async def get_conversation_messages(session_id: str):
     """Get all messages for a session from database"""
     try:
         from services.persistent_memory_service import PersistentMemoryService
-        db_service = PersistentMemoryService()
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
         
-        messages = db_service.get_session_messages(session_id)
+        # Use get_conversation_history (not get_session_messages)
+        messages = db_service.get_conversation_history(session_id)
+        
+        # Convert to expected format
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "message_type": msg["role"],
+                "message_content": msg["content"],
+                "timestamp": msg["timestamp"],
+                "metadata": msg["metadata"]
+            })
         
         return {
             "success": True,
             "session_id": session_id,
-            "message_count": len(messages),
-            "messages": messages
+            "message_count": len(formatted_messages),
+            "messages": formatted_messages
         }
         
     except Exception as e:
@@ -698,13 +725,18 @@ async def update_conversation_context(
     """Update conversation context in database"""
     try:
         from services.persistent_memory_service import PersistentMemoryService
-        db_service = PersistentMemoryService()
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
         
-        success = db_service.update_conversation_context(
+        # Convert tables string to list
+        tables_list = last_tables_used.split(",") if last_tables_used else None
+        
+        # Use update_context (not update_conversation_context)
+        success = db_service.update_context(
             session_id=session_id,
-            last_query=last_query,
-            last_sql=last_sql,
-            last_tables_used=last_tables_used,
+            query=last_query,
+            sql=last_sql,
+            tables=tables_list,
             result_count=result_count
         )
         
@@ -722,9 +754,11 @@ async def clear_conversation_session(session_id: str):
     """Clear all messages for a session from database"""
     try:
         from services.persistent_memory_service import PersistentMemoryService
-        db_service = PersistentMemoryService()
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
         
-        success = db_service.clear_session_messages(session_id)
+        # Use clear_session (this method exists)
+        success = db_service.clear_session(session_id)
         
         return {
             "success": success,
@@ -737,6 +771,7 @@ async def clear_conversation_session(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 # ========== END DATABASE CONVERSATION MEMORY ENDPOINTS ==========
+
 
 
 # Helth Checking
