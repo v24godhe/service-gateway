@@ -613,76 +613,225 @@ def clean_sql_output(sql: str) -> str:
 
 
 def generate_sql(question: str, username: str, conversation_history=None, role_context_override="") -> str:
-    """Generate SQL using context, role, and conversation memory with value extraction"""
+    """Generate SQL using UNIVERSAL context memory - remembers ALL entities and topics"""
     
     # Get role-based context
     role_ctx = role_context_override or ROLE_PROMPTS.get(username, "")
     
-    # Enhanced chat context with value extraction
+    # Universal entity extraction
     chat_context = ""
-    extracted_values = {}
+    memory = {
+        'entities': {},  # All extracted entities
+        'last_topic': None,  # What was the last discussion about
+        'context_summary': []  # Key points from conversation
+    }
     
     if conversation_history and len(conversation_history) > 0:
-        recent_history = conversation_history[-12:] if len(conversation_history) > 12 else conversation_history
+        recent_history = conversation_history[-10:] if len(conversation_history) > 10 else conversation_history
         
-        # Extract specific values from previous responses
+        # EXTRACT ALL TYPES OF ENTITIES from conversation
         for entry in recent_history:
-            if "Assistant:" in entry:
-                # Extract customer names, numbers, IDs etc.
-                import re
-                
-                # Extract customer numbers
-                customer_numbers = re.findall(r'Customer Number[:\s]*(\d+)', entry, re.IGNORECASE)
-                if customer_numbers:
-                    extracted_values['customer_numbers'] = customer_numbers
-                
-                # Extract customer names
-                customer_names = re.findall(r'Customer Name[:\s]*([^,\n]+)', entry, re.IGNORECASE)
-                if customer_names:
-                    extracted_values['customer_names'] = [name.strip() for name in customer_names]
-                
-                # Extract specific names mentioned (like "Camila")
-                name_matches = re.findall(r'(?:Customer Name[:\s]*|Address for Customer\s+)([A-Z][a-zA-Z\s]+)', entry)
-                if name_matches:
-                    extracted_values['mentioned_names'] = [name.strip() for name in name_matches]
+            
+            # 1. NUMBERS (customers, orders, invoices, articles, amounts)
+            numbers = re.findall(r'\b(\d{1,10})\b', entry)
+            for num in numbers:
+                num_int = int(num)
+                # Classify by magnitude
+                if 1 <= num_int <= 99999:
+                    if 'numbers' not in memory['entities']:
+                        memory['entities']['numbers'] = []
+                    if num not in memory['entities']['numbers']:
+                        memory['entities']['numbers'].append(num)
+            
+            # 2. NAMES (customers, suppliers, contacts, products)
+            # Look for capitalized words/phrases
+            name_matches = re.findall(r'\b([A-ZÅÄÖ][a-zåäö]+(?:\s+[A-ZÅÄÖ][a-zåäö]+)*)\b', entry)
+            for name in name_matches:
+                if len(name) > 2 and name not in ['User', 'Assistant', 'Customer', 'Order', 'Invoice']:
+                    if 'names' not in memory['entities']:
+                        memory['entities']['names'] = []
+                    if name not in memory['entities']['names']:
+                        memory['entities']['names'].append(name)
+            
+            # 3. DATES (various formats)
+            date_patterns = [
+                r'\b(\d{4}-\d{2}-\d{2})\b',  # 2025-10-09
+                r'\b(\d{8})\b',              # 20251009
+                r'\b(\d{1,2}/\d{1,2}/\d{4})\b',  # 10/09/2025
+                r'\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b'
+            ]
+            for pattern in date_patterns:
+                dates = re.findall(pattern, entry, re.IGNORECASE)
+                if dates:
+                    if 'dates' not in memory['entities']:
+                        memory['entities']['dates'] = []
+                    memory['entities']['dates'].extend([d for d in dates if d not in memory['entities'].get('dates', [])])
+            
+            # 4. AMOUNTS/CURRENCY
+            amount_matches = re.findall(r'(\d+[,\.]?\d*)\s*(SEK|EUR|USD|kr)', entry, re.IGNORECASE)
+            if amount_matches:
+                if 'amounts' not in memory['entities']:
+                    memory['entities']['amounts'] = []
+                memory['entities']['amounts'].extend([f"{amt[0]} {amt[1]}" for amt in amount_matches])
+            
+            # 5. KEY FIELDS mentioned (extract database fields/concepts)
+            field_keywords = {
+                'customer': ['KHKNR', 'customer number', 'customer', 'kund'],
+                'order': ['OHONR', 'order number', 'order', 'beställning'],
+                'invoice': ['KRFNR', 'invoice number', 'invoice', 'faktura'],
+                'article': ['AHANR', 'article number', 'article', 'artikel', 'product'],
+                'supplier': ['LHLNR', 'supplier', 'leverantör'],
+                'address': ['address', 'adress', 'location'],
+                'phone': ['phone', 'telephone', 'telefon'],
+                'email': ['email', 'e-post'],
+                'date': ['date', 'datum', 'when'],
+                'amount': ['amount', 'price', 'cost', 'belopp', 'pris']
+            }
+            
+            for field_type, keywords in field_keywords.items():
+                for keyword in keywords:
+                    if keyword.lower() in entry.lower():
+                        if 'fields_mentioned' not in memory['entities']:
+                            memory['entities']['fields_mentioned'] = []
+                        if field_type not in memory['entities']['fields_mentioned']:
+                            memory['entities']['fields_mentioned'].append(field_type)
         
-        # Build enhanced context
-        chat_context = f"""
-        Previous conversation context:
-        {chr(10).join(recent_history)}
+        # BUILD CONTEXT SUMMARY
+        if memory['entities']:
+            chat_context = f"""
+        ═══════════════════════════════════════════
+        CONVERSATION MEMORY (Last {len(recent_history)} messages)
+        ═══════════════════════════════════════════
 
-        Extracted values from context:
-        {extracted_values}
+        RECENT CONVERSATION:
+        {chr(10).join(['- ' + msg for msg in recent_history[-5:]])}
 
-        Current follow-up question context:
-        - If the question references "her", "his", "their", "them", "this customer", etc., use the most recent customer from the context
-        - If asking about the same customer, use their specific customer number or name from above
-        - For follow-up questions, be specific and use exact values rather than parameters
+        EXTRACTED ENTITIES & CONTEXT:
         """
+            
+            if 'numbers' in memory['entities'] and memory['entities']['numbers']:
+                most_recent_num = memory['entities']['numbers'][-1]
+                chat_context += f"\n📊 NUMBERS DISCUSSED: {', '.join(memory['entities']['numbers'][-5:])} (Most Recent: {most_recent_num})"
+            
+            if 'names' in memory['entities'] and memory['entities']['names']:
+                most_recent_name = memory['entities']['names'][-1]
+                chat_context += f"\n👤 NAMES MENTIONED: {', '.join(memory['entities']['names'][-5:])} (Most Recent: {most_recent_name})"
+            
+            if 'dates' in memory['entities'] and memory['entities']['dates']:
+                chat_context += f"\n📅 DATES: {', '.join(memory['entities']['dates'][-3:])}"
+            
+            if 'amounts' in memory['entities'] and memory['entities']['amounts']:
+                chat_context += f"\n💰 AMOUNTS: {', '.join(memory['entities']['amounts'][-3:])}"
+            
+            if 'fields_mentioned' in memory['entities'] and memory['entities']['fields_mentioned']:
+                chat_context += f"\n🔑 TOPICS: {', '.join(memory['entities']['fields_mentioned'][-5:])}"
+            
+            chat_context += "\n═══════════════════════════════════════════\n"
     
-    # Special handling for follow-up questions
-    follow_up_indicators = ['her', 'his', 'their', 'them', 'this customer', 'that customer', 'what is', 'what are']
-    is_follow_up = any(indicator in question.lower() for indicator in follow_up_indicators)
+    # DETECT FOLLOW-UP QUESTIONS (generic indicators)
+    follow_up_indicators = [
+        # Pronouns
+        'his', 'her', 'their', 'them', 'it', 'its', 'this', 'that', 'these', 'those',
+        'he', 'she', 'they',
+        # References
+        'same', 'the', 'such',
+        # Single word queries (often follow-ups)
+        '^(name|address|phone|email|orders|invoices|details|info|information|status|date|amount|price|total)$',
+        # Question words without subject
+        'what is', 'what are', 'show me', 'get me', 'find'
+    ]
     
-    if is_follow_up and extracted_values:
-        if 'mentioned_names' in extracted_values and extracted_values['mentioned_names']:
-            # Use the most recent mentioned name
-            recent_name = extracted_values['mentioned_names'][-1]
-            chat_context += f"\n\nIMPORTANT: This is a follow-up question about '{recent_name}'. Use this exact name in your WHERE clause like: UPPER(k.KHFKN) LIKE '%{recent_name.upper()}%'"
-        elif 'customer_numbers' in extracted_values and extracted_values['customer_numbers']:
-            # Use the most recent customer number
-            recent_number = extracted_values['customer_numbers'][-1]
-            chat_context += f"\n\nIMPORTANT: This is a follow-up question about customer number {recent_number}. Use: k.KHKNR = '{recent_number}'"
+    is_follow_up = any(
+        re.search(indicator, question.lower()) 
+        for indicator in follow_up_indicators
+    )
+    
+    # INTELLIGENT CONTEXT MATCHING
+    sql_context_hint = ""
+    if is_follow_up and memory['entities']:
+        # Determine what the question is asking about
+        question_lower = question.lower()
+        
+        # Provide context based on what's being asked
+        if any(word in question_lower for word in ['customer', 'name', 'address', 'phone', 'email', 'contact', 'kund']):
+            # Customer-related follow-up
+            if 'numbers' in memory['entities'] and memory['entities']['numbers']:
+                most_recent = memory['entities']['numbers'][-1]
+                sql_context_hint = f"""
 
+    🎯 FOLLOW-UP DETECTED: Customer Query
+    CONTEXT: You just discussed entity with number/ID: {most_recent}
+    ACTION: Use this in your WHERE clause: WHERE KHKNR = '{most_recent}' AND KHSTS = '1'
+    Or if name-based: WHERE UPPER(KHFKN) LIKE '%{memory['entities'].get('names', [''])[-1].upper()}%' AND KHSTS = '1'
+    """
+        
+        elif any(word in question_lower for word in ['order', 'orders', 'beställning']):
+            # Order-related follow-up
+            if 'numbers' in memory['entities'] and memory['entities']['numbers']:
+                context_num = memory['entities']['numbers'][-1]
+                sql_context_hint = f"""
+
+    🎯 FOLLOW-UP DETECTED: Order Query
+    CONTEXT: Previous discussion involved number: {context_num}
+    ACTION: Use context - either:
+    - Order number: WHERE OHONR = '{context_num}'
+    - Customer's orders: WHERE OHKNR = '{context_num}' AND OHSTS = '1'
+    """
+        
+        elif any(word in question_lower for word in ['invoice', 'invoices', 'faktura', 'payment']):
+            # Invoice-related follow-up
+            if 'numbers' in memory['entities'] and memory['entities']['numbers']:
+                context_num = memory['entities']['numbers'][-1]
+                sql_context_hint = f"""
+
+    🎯 FOLLOW-UP DETECTED: Invoice Query
+    CONTEXT: Previous discussion involved number: {context_num}
+    ACTION: Use context - either:
+    - Invoice number: WHERE KRFNR = '{context_num}'
+    - Customer's invoices: WHERE KRKNR = '{context_num}'
+    """
+        
+        elif any(word in question_lower for word in ['article', 'product', 'item', 'artikel']):
+            # Article-related follow-up
+            if 'numbers' in memory['entities'] and memory['entities']['numbers']:
+                context_num = memory['entities']['numbers'][-1]
+                sql_context_hint = f"""
+
+    🎯 FOLLOW-UP DETECTED: Article/Product Query
+    CONTEXT: Previous discussion involved number: {context_num}
+    ACTION: Consider this article number: WHERE AHANR = '{context_num}' AND AHSTS = '1'
+    """
+        
+        else:
+            # Generic follow-up - provide all context
+            sql_context_hint = f"""
+
+    🎯 FOLLOW-UP DETECTED: General Query
+    RECENT CONTEXT:
+    - Most recent number: {memory['entities'].get('numbers', ['N/A'])[-1]}
+    - Most recent name: {memory['entities'].get('names', ['N/A'])[-1]}
+    - Topics discussed: {', '.join(memory['entities'].get('fields_mentioned', ['N/A'])[-3:])}
+
+    ACTION: Use the most relevant context from above based on the user's question.
+    """
+    
+    # BUILD FINAL PROMPT
     sql_prompt = f"""{role_ctx}
 
     {chat_context}
 
-    Current user question: "{question}"
+    {sql_context_hint}
+
+    CURRENT USER QUESTION: "{question}"
 
     DATABASE SCHEMA: {DATABASE_SCHEMA}
 
-    Generate SQL following the rules in the system prompt. If this is a follow-up question, use the specific values from context. NEVER use parameter placeholders. Return ONLY the SQL query.
+    INSTRUCTIONS:
+    1. If FOLLOW-UP DETECTED above, use that context in your SQL
+    2. Generate SQL that answers the current question using available context
+    3. Return ONLY the SQL query, no explanations
+
+    Generate the SQL now:
     """
 
     response = client.chat.completions.create(
@@ -720,24 +869,44 @@ async def get_database_conversation_history(session_id: str, username: str, max_
             )
             
             if response.status_code == 200:
-                db_messages = response.json()
+                result = response.json()
+                
+                # FIXED: Handle different response formats
+                if isinstance(result, dict):
+                    # If response is wrapped in an object
+                    db_messages = result.get('messages', result.get('data', []))
+                elif isinstance(result, list):
+                    # If response is direct list
+                    db_messages = result
+                else:
+                    print(f"Unexpected response type: {type(result)}")
+                    return conversation_history
+                
+                print(f"✅ Loaded {len(db_messages)} messages from database")
                 
                 # Convert to conversation history format (last N messages)
                 recent_messages = db_messages[-max_messages:] if len(db_messages) > max_messages else db_messages
                 
                 for msg in recent_messages:
-                    if msg['message_type'] == 'user':
-                        conversation_history.append(f"User: {msg['message_content']}")
-                    elif msg['message_type'] == 'assistant':
-                        # Include first 200 chars of response for context
-                        response_summary = msg['message_content'][:200] + "..." if len(msg['message_content']) > 200 else msg['message_content']
-                        conversation_history.append(f"Assistant: {response_summary}")
+                    try:
+                        if msg['message_type'] == 'user':
+                            conversation_history.append(f"User: {msg['message_content']}")
+                        elif msg['message_type'] == 'assistant':
+                            # Include first 200 chars of response for context
+                            response_summary = msg['message_content'][:200] + "..." if len(msg['message_content']) > 200 else msg['message_content']
+                            conversation_history.append(f"Assistant: {response_summary}")
+                    except (KeyError, TypeError) as e:
+                        print(f"⚠️ Skipping malformed message: {e}")
+                        continue
                 
-                print(f"DEBUG: Loaded {len(conversation_history)} messages from database for user {username}")
-                print(f"DEBUG: Recent context: {conversation_history[-3:] if conversation_history else 'None'}")
+                print(f"✅ Parsed {len(conversation_history)} conversation turns")
+                if conversation_history:
+                    print(f"📝 Recent context preview: {conversation_history[-2:]}")
                 
     except Exception as e:
-        print(f"Warning: Could not load database history for session {session_id}: {e}")
+        print(f"❌ Error loading conversation history: {e}")
+        import traceback
+        traceback.print_exc()
     
     return conversation_history
 
@@ -791,11 +960,15 @@ def generate_sql_with_session_context(question: str, username: str, session_id: 
     # Get conversation history from database if session_id provided
     conversation_history = []
     if session_id:
+        print(f"🔍 Loading context for session: {session_id}")
         try:
             # Run async function in sync context
             conversation_history = asyncio.run(get_database_conversation_history(session_id, username))
+            print(f"📚 Conversation history loaded: {len(conversation_history)} turns")
         except Exception as e:
-            print(f"Could not load session context: {e}")
+            print(f"❌ Could not load session context: {e}")
+    else:
+        print(f"⚠️ No session_id provided - no context available")
     
     # Use existing generate_sql function with database history
     return generate_sql(question, username, conversation_history, role_context_override)

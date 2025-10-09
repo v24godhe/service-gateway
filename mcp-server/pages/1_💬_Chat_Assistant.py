@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from datetime import datetime
-from utils.text_to_sql_converter import generate_sql, ROLE_PROMPTS
+from utils.text_to_sql_converter import generate_sql, generate_sql_with_session_context, ROLE_PROMPTS
 load_dotenv()
 
 st.set_page_config(
@@ -320,7 +320,7 @@ def initialize_chat_session():
 
 
 def save_message_to_database(role: str, content: str, metadata: dict = None):
-    """Save message to database with error handling"""
+    """Save message to database with error handling and session auto-creation"""
     
     # Skip if database service not available
     if not db_memory_service:
@@ -331,6 +331,22 @@ def save_message_to_database(role: str, content: str, metadata: dict = None):
         return False
     
     try:
+        # FORCE CREATE SESSION FIRST - CRITICAL FIX
+        try:
+            session_created = asyncio.run(db_memory_service.create_session(
+                session_id=st.session_state.session_id,
+                user_id=st.session_state.get('username', 'unknown'),
+                metadata={"created": datetime.now().isoformat()}
+            ))
+            if session_created:
+                print(f"✅ Session created: {st.session_state.session_id}")
+            else:
+                print(f"ℹ️ Session already exists: {st.session_state.session_id}")
+        except Exception as session_error:
+            # Session might already exist - that's OK
+            print(f"Session creation note: {session_error}")
+        
+        # NOW save the message
         success = asyncio.run(db_memory_service.save_message(
             session_id=st.session_state.session_id,
             message_type=role,
@@ -338,15 +354,15 @@ def save_message_to_database(role: str, content: str, metadata: dict = None):
             message_metadata=json.dumps(metadata) if metadata else None
         ))
         
-        if not success:
-            st.sidebar.error("⚠️ Failed to save message to database")
-            return False
-        
-        # Update session activity
-        return True
+        if success:
+            print(f"✅ Message saved: {role} - {content[:50]}...")
+        else:
+            print(f"❌ Message save failed")
+            
+        return success
         
     except Exception as e:
-        st.sidebar.error(f"❌ Database save error: {str(e)}")
+        print(f"❌ Database save error: {str(e)}")
         return False
 
 def update_conversation_context(user_question: str, generated_sql: str, tables_used: str = "", result_count: int = 0):
@@ -375,6 +391,12 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
 if 'username' not in st.session_state:
     st.session_state.username = None
+if 'last_query_sql' not in st.session_state:
+    st.session_state.last_query_sql = None
+if 'last_query_rows' not in st.session_state:
+    st.session_state.last_query_rows = None
+if 'last_query_question' not in st.session_state:
+    st.session_state.last_query_question = None
 
 async def execute_query(sql: str, username: str):
     async with httpx.AsyncClient() as http_client:
@@ -402,19 +424,19 @@ def format_results(question: str, rows: list, username: str) -> str:
     
     format_prompt = f"""User asked: "{question}"
 
-Database results ({len(rows)} rows):
-{rows}
+    Database results ({len(rows)} rows):
+    {rows}
 
-Instructions:
-1. Present the data clearly and professionally
-2. Format numbers: 1,234,567 SEK for money, dates as readable text
-3. Lead with the key answer or total
-4. Be comprehensive but concise
-5. DO NOT add suggestions, next steps, or additional analysis
-6. Just present the facts directly and professionally
-7. If dates are in YYYYMMDD format, convert to readable: 20251006 → October 6, 2025
+    Instructions:
+    1. Present the data clearly and professionally
+    2. Format numbers: 1,234,567 SEK for money, dates as readable text
+    3. Lead with the key answer or total
+    4. Be comprehensive but concise
+    5. DO NOT add suggestions, next steps, or additional analysis
+    6. Just present the facts directly and professionally
+    7. If dates are in YYYYMMDD format, convert to readable: 20251006 → October 6, 2025
 
-Present the answer now:"""
+    Present the answer now:"""
 
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -426,10 +448,37 @@ Present the answer now:"""
     )
     return response.choices[0].message.content
 
+async def export_to_pdf(sql_query: str, username: str):
+    """Export last query results to PDF"""
+    async with httpx.AsyncClient() as http_client:
+        response = await http_client.post(
+            f"{GATEWAY_URL}/api/export-pdf",
+            json={"query": sql_query},
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "X-Username": username
+            },
+            timeout=30.0
+        )
+        return response.content if response.status_code == 200 else None
+
+async def export_to_excel(sql_query: str, username: str):
+    """Export last query results to Excel"""
+    async with httpx.AsyncClient() as http_client:
+        response = await http_client.post(
+            f"{GATEWAY_URL}/api/export-excel",
+            json={"query": sql_query},
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "X-Username": username
+            },
+            timeout=30.0
+        )
+        return response.content if response.status_code == 200 else None
+
 # Sidebar
 with st.sidebar:
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg",
-             width=True)
+    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg",use_container_width=True)
     st.markdown("---")
 
     if st.session_state.username is None:
@@ -447,11 +496,11 @@ with st.sidebar:
             }[x]
         )
 
-        if st.button("Login", width=True):
+        if st.button("Login", use_container_width=True):
             if username:
                 st.session_state.username = username
                 st.session_state.messages = []
-                initialize_chat_session()  # ADD THIS LINE
+                initialize_chat_session()
                 st.rerun()
     else:
         st.markdown(f"### Logged in as")
@@ -462,10 +511,9 @@ with st.sidebar:
         st.markdown(f"**Today:** {TODAY.strftime('%B %d, %Y')}")
         st.markdown(f"**This Week:** {datetime.strptime(WEEK_START, '%Y%m%d').strftime('%b %d')} - {datetime.strptime(WEEK_END, '%Y%m%d').strftime('%b %d')}")
 
-        if st.button("Logout", width=True):
+        if st.button("Logout", use_container_width=True):
             st.session_state.username = None
             st.session_state.messages = []
-            st.rerun()
 
         # ADD THIS NEW SECTION:
         st.markdown("---")
@@ -479,7 +527,7 @@ with st.sidebar:
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("🗑️ Clear Session", width=True):
+            if st.button("🗑️ Clear Session", use_container_width=True):
                 try:
                     # Clear from database
                     if db_memory_service and 'session_id' in st.session_state:
@@ -499,7 +547,7 @@ with st.sidebar:
                     st.error(f"Clear error: {str(e)}")
 
         with col2:
-            if st.button("📱 New Session", width=True):
+            if st.button("📱 New Session", use_container_width=True):
                 try:
                     # Start new session
                     st.session_state.session_id = str(uuid.uuid4())
@@ -525,14 +573,75 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Stats error: {str(e)}")
 
-
+         # ========== ADD EXPORT BUTTONS HERE ==========
+        st.markdown("---")
+        st.markdown("### 📥 Export Last Result")
+        
+        has_export_data = (
+            'last_query_rows' in st.session_state and 
+            st.session_state.last_query_rows and 
+            len(st.session_state.last_query_rows) > 0
+        )
+        
+        if has_export_data:
+            st.info(f"**{len(st.session_state.last_query_rows)}** rows")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📄 PDF", use_container_width=True):
+                    with st.spinner("Generating..."):
+                        try:
+                            pdf_data = asyncio.run(export_to_pdf(
+                                st.session_state.last_query_sql,
+                                st.session_state.username
+                            ))
+                            
+                            if pdf_data:
+                                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                st.download_button(
+                                    label="⬇️ Download PDF",
+                                    data=pdf_data,
+                                    file_name=f"results_{ts}.pdf",
+                                    mime="application/pdf",
+                                    use_container_width=True
+                                )
+                            else:
+                                st.error("❌ Failed")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+            
+            with col2:
+                if st.button("📊 Excel", use_container_width=True):
+                    with st.spinner("Generating..."):
+                        try:
+                            excel_data = asyncio.run(export_to_excel(
+                                st.session_state.last_query_sql,
+                                st.session_state.username
+                            ))
+                            
+                            if excel_data:
+                                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                st.download_button(
+                                    label="⬇️ Download Excel",
+                                    data=excel_data,
+                                    file_name=f"results_{ts}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                            else:
+                                st.error("❌ Failed")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+        else:
+            st.warning("⚠️ No data. Run query first.")
+        # ========== END EXPORT BUTTONS ==========
 
 # Main content
 if st.session_state.username is None:
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
-                 width=True)
+        st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",use_container_width=True)
         st.markdown("<h1 style='text-align: center;'>AI Assistant</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666;'>Select your account to get started</p>",
                    unsafe_allow_html=True)
@@ -574,9 +683,17 @@ else:
         with st.spinner("Analyzing..."):
             try:
                 # Generate SQL with conversation context
-                sql = generate_sql(user_input, st.session_state.username)
-                print("GENERATED SQL:", sql)
-                print(f"DEBUG: Generated SQL = {sql}")
+                sql = generate_sql_with_session_context(
+                    user_input, 
+                    st.session_state.username,
+                    st.session_state.get('session_id', None)
+                )
+                print(f"🔍 Session ID used for context: {st.session_state.get('session_id', 'NONE')}")
+                # DEBUG: Print what context was used
+                print(f"DEBUG - User question: {user_input}")
+                print(f"DEBUG - Session ID: {st.session_state.get('session_id', 'NONE')}")
+                print(f"DEBUG - Generated SQL: {sql}")
+
                 if not sql.strip().upper().startswith("SELECT"):
                     response = "I can only retrieve information from the system; I can't perform any other operations at the moment."
                 else:
@@ -587,6 +704,11 @@ else:
                             response = "No data found matching your query."
                         else:
                             response = format_results(user_input, rows, st.session_state.username)
+                            
+                            # STORE LAST QUERY RESULT FOR EXPORT
+                            st.session_state.last_query_sql = sql
+                            st.session_state.last_query_rows = rows
+                            st.session_state.last_query_question = user_input
                             
                             # Save to conversation memory
                             memory.save_context(
