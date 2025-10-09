@@ -27,74 +27,200 @@ class ChatChartIntegration:
         if 'chart_history' not in st.session_state:
             st.session_state.chart_history = []
 
-    def process_user_message(self, user_message: str, user_role: str = None) -> Tuple[bool, str, Optional[Any]]:
+    def process_user_message(self, sql_query: str, user_role: str = None, original_message: str = "") -> Tuple[bool, str, Optional[Any]]:
         """
-        Process user message and determine if chart generation is needed
-
-        Returns:
-            (is_chart_request, response_text, chart_figure)
+        Process SQL query and generate chart based on user intent
         """
-        # Step 1: Detect chart intent
-        intent = self.intent_detector.detect_chart_intent(user_message)
-
-        if not intent.is_chart_request:
-            return False, None, None
-
-        # Step 2: Get data from FastAPI
         try:
-            data, columns = self._fetch_data_from_api(user_message, intent, user_role)
-
+            import asyncio
+            data, columns = asyncio.run(self._fetch_data_from_api(sql_query, user_role))
+            
             if data is None or data.empty:
-                return True, "I couldn't find any data to create a chart. Please try a different query or check if the data exists.", None
-
-            # Step 3: Build chart configuration
-            config = self.config_builder.build_config(intent, columns)
-
-            # Step 4: Generate chart
-            fig = self.chart_generator.generate_chart(config, data)
-
-            # Step 5: Generate response text
-            response_text = self._generate_chart_response(config, data, user_message)
-
-            # Step 6: Save to history
-            self._save_to_history(user_message, config, data.shape)
-
+                return True, "I couldn't find any data to create a chart. Please try a different query.", None
+            
+            print("ORIGINAL DATA:")
+            print(f"Columns: {columns}")
+            print(f"Data types: {data.dtypes.to_dict()}")
+            print(f"Sample: {data.head(2).to_dict()}")
+            
+            # Step 3: Detect chart type
+            chart_type = self._auto_detect_chart_type(data, columns, original_message)
+            print("DETECTED CHART TYPE:", chart_type)
+            
+            # Step 4: Prepare data for the specific chart type
+            prepared_data = self._prepare_data_for_chart(data, chart_type)
+            
+            if prepared_data.empty:
+                return True, "No valid data available for chart creation after data preparation.", None
+            
+            # Step 5: Build chart configuration
+            config = self._build_simple_chart_config(prepared_data, columns, chart_type, original_message)
+            print(f"CHART CONFIG: {config.chart_type}, X:{config.x_column}, Y:{config.y_column}")
+            
+            # Step 6: Generate chart
+            fig = self.chart_generator.generate_chart(config, prepared_data)
+            
+            # Step 7: Generate response
+            response_text = f"I've created a {chart_type} chart with {len(prepared_data)} records."
+            
             return True, response_text, fig
-
+            
         except Exception as e:
+            import traceback
+            print("FULL ERROR:", traceback.format_exc())
             error_msg = f"Sorry, I encountered an error while creating the chart: {str(e)}"
             return True, error_msg, None
 
-    def _fetch_data_from_api(self, user_message: str, intent: ChartIntent, user_role: str = None) -> Tuple[Optional[pd.DataFrame], list]:
+
+    def _convert_to_datetime(self, series: pd.Series) -> pd.Series:
+        """Convert various date formats to datetime"""
+        
+        # If already datetime, return as is
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return series
+        
+        # Try multiple date formats in order of likelihood
+        date_formats = [
+            '%Y%m%d',        # AS400 format: 20250805
+            '%Y-%m-%d',      # ISO format: 2025-08-05
+            '%d/%m/%Y',      # European: 05/08/2025
+            '%m/%d/%Y',      # American: 08/05/2025
+            '%d-%m-%Y',      # European dash: 05-08-2025
+            '%m-%d-%Y',      # American dash: 08-05-2025
+            '%Y/%m/%d',      # Alternative: 2025/08/05
+            '%d.%m.%Y',      # German/European: 05.08.2025
+            '%Y%m%d%H%M%S',  # With time: 20250805143022
+            '%Y-%m-%d %H:%M:%S',  # ISO with time: 2025-08-05 14:30:22
+        ]
+        
+        converted_series = None
+        
+        for fmt in date_formats:
+            try:
+                # Try to convert using this format
+                converted_series = pd.to_datetime(series, format=fmt, errors='coerce')
+                
+                # If more than 80% converted successfully, use this format
+                success_rate = converted_series.notna().sum() / len(series)
+                if success_rate > 0.8:
+                    print(f"Successfully converted dates using format: {fmt} (success rate: {success_rate:.1%})")
+                    return converted_series
+            except:
+                continue
+        
+        # If no specific format worked, try pandas' automatic parsing
         try:
-            # Choose some valid user for demo; update with your actual user system
-            username = "ceo" if not user_role else user_role.lower()
-            headers = {
-                "Content-Type": "application/json",
-                "X-Username": username
-            }
-            payload = {
-                "query": user_message
-            }
-            response = requests.post(
-                f"{self.fastapi_base_url}/api/execute-query",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            if response.status_code == 200:
-                result = response.json()
-                # The typical structure is result['data']['rows'], fix if needed!
-                records = result.get("data", {}).get("rows", [])
-                if records:
-                    df = pd.DataFrame(records)
-                    return df, list(df.columns)
+            converted_series = pd.to_datetime(series, errors='coerce')
+            success_rate = converted_series.notna().sum() / len(series)
+            if success_rate > 0.5:  # Lower threshold for auto-parsing
+                print(f"Successfully auto-parsed dates (success rate: {success_rate:.1%})")
+                return converted_series
+        except:
+            pass
+        
+        print(f"Failed to convert dates. Sample values: {series.head(3).tolist()}")
+        return series  # Return original if all conversions fail
+
+        
+    def _auto_detect_chart_type(self, data: pd.DataFrame, columns: list, user_message: str = "") -> str:
+        """Chart type detection based on user intent AND data structure"""
+        
+        # PRIORITY 1: Check user's explicit chart type request
+        message_lower = user_message.lower()
+        
+        # Explicit pie chart requests
+        if any(keyword in message_lower for keyword in ['pie chart', 'pie', 'percentage', 'proportion', 'distribution']):
+            return 'pie'
+        
+        # Explicit bar chart requests  
+        if any(keyword in message_lower for keyword in ['bar chart', 'bar', 'bars', 'column', 'compare']):
+            return 'bar'
+        
+        # Explicit line chart requests
+        if any(keyword in message_lower for keyword in ['line chart', 'line', 'trend', 'over time', 'time series']):
+            return 'line'
+        
+        # PRIORITY 2: Auto-detect based on data structure (fallback)
+        date_columns = [col for col in columns if 'date' in col.lower() or 'time' in col.lower()]
+        if date_columns and len(columns) >= 2:
+            return 'line'
+        
+        # Default to bar for comparisons
+        return 'bar'
+
+
+    def _build_simple_chart_config(self, data: pd.DataFrame, columns: list, chart_type: str, original_message: str = ""):
+        """Build simple chart config from data with proper aggregation for pie charts"""
+        
+        from .chart_config import ChartConfig
+        
+        # Simple logic: first column as X, second as Y
+        x_col = columns[0] if columns else 'category'
+        y_col = columns[1] if len(columns) > 1 else columns[0] if columns else 'value'
+        
+        # FOR PIE CHARTS: Ensure we have aggregated data
+        if chart_type == 'pie':
+            # If we have multiple rows with same categories, aggregate them
+            if len(data) > data[x_col].nunique():
+                # Group by X column and sum Y column
+                aggregation = 'sum'
             else:
-                st.error(f"API Error: {response.status_code} - {response.text}")
-            return None, []
+                # Data is already aggregated
+                aggregation = None
+            title = f"{x_col.replace('_', ' ').title()} Distribution"
+        else:
+            aggregation = None
+            title = f"{y_col.replace('_', ' ').title()} by {x_col.replace('_', ' ').title()}"
+        
+        return ChartConfig(
+            chart_type=chart_type,
+            title=title,
+            x_column=x_col,
+            y_column=y_col,
+            color_column=None,
+            aggregation=aggregation,  # This will trigger aggregation in chart generator
+            chart_params={}
+        )
+
+
+
+    async def _fetch_data_from_api(self, sql_query: str, user_role: str = None, session_id: str = None) -> Tuple[Optional[pd.DataFrame], list]:
+        """
+        Fetch data using the same method as the working chat assistant
+        """
+        import asyncio
+        import httpx
+        import os
+        
+        try:
+            # Use same authentication as working chat
+            GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN")
+            
+            async with httpx.AsyncClient() as http_client:
+                response = await http_client.post(
+                    f"{self.fastapi_base_url}/api/execute-query",
+                    json={"query": sql_query},
+                    headers={
+                        "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                        "X-Username": user_role or "harold"
+                    },
+                    timeout=30.0
+                )
+                
+                result = response.json()
+                print("API RESPONSE:", result)
+                
+                if result.get("success") and result.get("data") and result["data"].get("rows"):
+                    df = pd.DataFrame(result["data"]["rows"])
+                    return df, list(df.columns)
+                else:
+                    st.error(f"❗ No data found: {result.get('message', 'Unknown error')}")
+                    return None, []
+                    
         except Exception as e:
-            st.error(f"Data fetch error: {str(e)}")
+            st.error(f"❗ Data fetch error: {str(e)}")
             return None, []
+
 
 
     def _extract_data_from_response(self, api_response: dict, intent: ChartIntent) -> Optional[pd.DataFrame]:
@@ -351,25 +477,77 @@ class ChatChartIntegration:
                     st.write(f"**Records**: {entry['data_records']}")
                     st.write(f"**Time**: {entry['timestamp'].strftime('%H:%M:%S')}")
 
+    def _prepare_data_for_chart(self, data: pd.DataFrame, chart_type: str) -> pd.DataFrame:
+        """Convert data types for proper chart rendering with universal date handling"""
+        
+        # Make a copy to avoid modifying original data
+        plot_data = data.copy()
+        
+        for col in plot_data.columns:
+            col_upper = col.upper()
+            
+            # PRIORITY 1: Handle date columns with comprehensive detection
+            if any(keyword in col_upper for keyword in ['DATE', 'DATO', 'DAT', 'TIME', 'OHDAO', 'CREATED', 'UPDATED', 'MODIFIED']):
+                print(f"Detected potential date column: {col}")
+                plot_data[col] = self._convert_to_datetime(plot_data[col])
+                
+            # PRIORITY 2: Handle numeric columns (amounts, counts, etc.)
+            elif any(keyword in col_upper for keyword in ['TOTAL', 'SALES', 'AMOUNT', 'VALUE', 'COUNT', 'REVENUE', 'ORDERS', 'PRICE', 'COST']):
+                try:
+                    # Try to convert to numeric
+                    numeric_series = pd.to_numeric(plot_data[col], errors='coerce')
+                    # If most values convert successfully, use the numeric version
+                    if numeric_series.notna().sum() > len(plot_data) * 0.8:
+                        plot_data[col] = numeric_series
+                        print(f"Converted {col} to numeric")
+                except:
+                    pass
+                    
+            # PRIORITY 3: Handle other object columns that might be numeric
+            elif plot_data[col].dtype == 'object':
+                # Check if it looks like numbers stored as strings
+                try:
+                    # Sample a few values to see if they're numeric
+                    sample = plot_data[col].dropna().head(5)
+                    numeric_sample = pd.to_numeric(sample, errors='coerce')
+                    if numeric_sample.notna().sum() == len(sample) and len(sample) > 0:
+                        plot_data[col] = pd.to_numeric(plot_data[col], errors='coerce')
+                        print(f"Converted string numbers in {col} to numeric")
+                except:
+                    pass
+        
+        # For pie charts, ensure we have at least one numeric column
+        if chart_type == 'pie':
+            numeric_cols = plot_data.select_dtypes(include=['float64', 'int64', 'float32', 'int32']).columns
+            if len(numeric_cols) == 0:
+                print("Warning: No numeric columns found for pie chart")
+        
+        print(f"Data prepared for {chart_type} chart:")
+        print(f"Shape: {plot_data.shape}")
+        print(f"Data types: {plot_data.dtypes.to_dict()}")
+        
+        return plot_data
+
+
+
 # Integration helper function
-def integrate_with_existing_chat(chat_integration: ChatChartIntegration, user_message: str, user_role: str = None):
+def integrate_with_existing_chat(chat_integration: ChatChartIntegration, sql_query: str, user_role: str = None, original_message: str = ""):
     """
     Helper function to integrate with existing chat logic
-
-    Call this in your existing chat message processing
     """
+    
+    # Always treat SQL queries as chart requests
+    is_chart_request, response_text, chart_figure = chat_integration.process_user_message(
+        sql_query, user_role, original_message
+    )
+    
+    if chart_figure is not None:
+        # Successfully created chart
+        chat_integration.render_chart_in_chat(chart_figure, response_text)
+        return True
+    else:
+        # Chart request but failed to create
+        with st.chat_message("assistant"):
+            st.write(response_text)
+        return True
 
-    is_chart_request, response_text, chart_figure = chat_integration.process_user_message(user_message, user_role)
-
-    if is_chart_request:
-        if chart_figure is not None:
-            # Successfully created chart
-            chat_integration.render_chart_in_chat(chart_figure, response_text)
-            return True  # Indicate chart was processed
-        else:
-            # Chart request but failed to create
-            with st.chat_message("assistant"):
-                st.write(response_text)
-            return True
-
-    return False  # Not a chart request, continue with normal chat logic

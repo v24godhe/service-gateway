@@ -238,49 +238,86 @@ def initialize_conversation_memory():
     return st.session_state.conversation_memory
 
 def initialize_chat_session():
-    """Initialize or restore chat session with database integration"""
+    """Initialize or restore chat session with database integration and proper session persistence"""
     
-    # Generate session ID if not exists
-    if 'session_id' not in st.session_state:
+    # Always ensure we have a session_id and user_id
+    if 'session_id' not in st.session_state or not st.session_state.session_id:
         st.session_state.session_id = str(uuid.uuid4())
+        print(f"Created new session: {st.session_state.session_id}")
+    else:
+        print(f"Using existing session: {st.session_state.session_id}")
+    
+    # Ensure user_id is set
+    if 'user_id' not in st.session_state:
         st.session_state.user_id = st.session_state.username if st.session_state.username else "default_user"
     
     # Skip database operations if service is not available
     if not db_memory_service:
         st.warning("⚠️ Database memory service not available - using session memory only")
+        if 'messages' not in st.session_state:
+            st.session_state.messages = []
         return
     
     # Initialize database session
     try:
-        # Create session in database
-        session_created = asyncio.run(db_memory_service.create_session(
-            session_id=st.session_state.session_id,
-            user_id=st.session_state.user_id,
-            metadata={"started_at": datetime.now().isoformat()}
-        ))
-        
-        if session_created:
-            st.sidebar.success("✅ Database session initialized")
-        
-        # Load existing conversation history from database
-        messages = asyncio.run(db_memory_service.get_session_messages(st.session_state.session_id))
-        
-        # Convert database messages to Streamlit format
-        if messages and len(messages) > 0:
-            st.session_state.messages = []
-            for msg in messages:
-                st.session_state.messages.append({
-                    "role": msg['message_type'],
-                    "content": msg['message_content'],
-                    "timestamp": msg.get('timestamp', '')
-                })
-            st.sidebar.info(f"📚 Loaded {len(messages)} messages from database")
-    
+        # Check if session already exists, if not create it
+        try:
+            # Try to load existing messages first to see if session exists
+            existing_messages = asyncio.run(db_memory_service.get_session_messages(st.session_state.session_id))
+            print(f"Found existing session with {len(existing_messages)} messages")
+            
+            # Convert database messages to Streamlit format
+            if existing_messages and len(existing_messages) > 0:
+                st.session_state.messages = []
+                for msg in existing_messages:
+                    st.session_state.messages.append({
+                        "role": msg['message_type'],
+                        "content": msg['message_content'],
+                        "timestamp": msg.get('timestamp', '')
+                    })
+                st.sidebar.info(f"📚 Loaded {len(existing_messages)} messages from database")
+            else:
+                # No existing messages, ensure we have empty list
+                if 'messages' not in st.session_state:
+                    st.session_state.messages = []
+            
+        except Exception as load_error:
+            print(f"Session doesn't exist or load failed: {load_error}")
+            
+            # Create new session in database
+            session_created = asyncio.run(db_memory_service.create_session(
+                session_id=st.session_state.session_id,
+                user_id=st.session_state.user_id,
+                metadata={
+                    "created": datetime.now().isoformat(),
+                    "username": st.session_state.username
+                }
+            ))
+            
+            if session_created:
+                st.sidebar.success("✅ New database session created")
+                print(f"Created new database session: {st.session_state.session_id}")
+            else:
+                st.sidebar.warning("⚠️ Could not create database session")
+            
+            # Initialize empty messages
+            if 'messages' not in st.session_state:
+                st.session_state.messages = []
+                
     except Exception as e:
         st.sidebar.error(f"❌ Database initialization error: {str(e)}")
+        print(f"Database initialization error: {e}")
+        
         # Fall back to session-only memory
         if 'messages' not in st.session_state:
             st.session_state.messages = []
+    
+    # Ensure conversation memory is initialized
+    initialize_conversation_memory()
+    
+    print(f"Session initialized: {st.session_state.session_id}")
+    print(f"Messages count: {len(st.session_state.messages)}")
+
 
 def save_message_to_database(role: str, content: str, metadata: dict = None):
     """Save message to database with error handling"""
@@ -353,10 +390,12 @@ async def execute_query(sql: str, username: str):
         return response.json()
 
 
-def handle_sql_generation(question: str, username: str, conversation_history=None):
-    sql = generate_sql(question, username, conversation_history)
-    # Now run and display results as before
-    return sql
+def handle_sql_generation(question: str, username: str):
+    """Generate SQL with database conversation context"""
+    from utils.text_to_sql_converter import generate_sql_with_session_context
+    
+    session_id = st.session_state.get('session_id', None)
+    return generate_sql_with_session_context(question, username, session_id)
 
 def format_results(question: str, rows: list, username: str) -> str:
     """Format results based on role - NO unnecessary suggestions"""
@@ -535,7 +574,8 @@ else:
         with st.spinner("Analyzing..."):
             try:
                 # Generate SQL with conversation context
-                sql = clean_sql_output(generate_sql(user_input, st.session_state.username))
+                sql = generate_sql(user_input, st.session_state.username)
+                print("GENERATED SQL:", sql)
                 print(f"DEBUG: Generated SQL = {sql}")
                 if not sql.strip().upper().startswith("SELECT"):
                     response = "I can only retrieve information from the system; I can't perform any other operations at the moment."

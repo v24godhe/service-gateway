@@ -126,50 +126,135 @@ class PlotlyChartGenerator:
         return fig
 
     def _create_line_chart(self, config: ChartConfig, data: pd.DataFrame, color_palette: str) -> go.Figure:
-        """Create line chart"""
+        """Create line chart with robust date formatting"""
         colors = self.color_palettes.get(color_palette, self.color_palettes['professional'])
-
-        if config.color_column and config.color_column in data.columns:
+        
+        plot_data = data.copy()
+        
+        # Sort by X-axis for proper line progression (especially important for dates)
+        try:
+            if pd.api.types.is_datetime64_any_dtype(plot_data[config.x_column]):
+                plot_data = plot_data.sort_values(config.x_column)
+            elif pd.api.types.is_numeric_dtype(plot_data[config.x_column]):
+                plot_data = plot_data.sort_values(config.x_column)
+        except:
+            pass
+        
+        # Create the line chart
+        if config.color_column and config.color_column in plot_data.columns:
             fig = px.line(
-                data,
+                plot_data,
                 x=config.x_column,
                 y=config.y_column,
                 color=config.color_column,
                 title=config.title,
-                color_discrete_sequence=colors
+                color_discrete_sequence=colors,
+                markers=True
             )
         else:
             fig = px.line(
-                data,
+                plot_data,
                 x=config.x_column,
                 y=config.y_column,
                 title=config.title,
-                color_discrete_sequence=colors
+                color_discrete_sequence=[colors[0]] if colors else None,
+                markers=True
             )
-
-        # Add markers if configured
-        if config.chart_params and config.chart_params.get('markers', False):
-            fig.update_traces(mode='lines+markers')
-
+        
+        # Format the axes
+        fig.update_xaxes(title=config.x_column.replace('_', ' ').title())
+        fig.update_yaxes(title=config.y_column.replace('_', ' ').title())
+        
+        # Enhanced X-axis formatting based on data type
+        if pd.api.types.is_datetime64_any_dtype(plot_data[config.x_column]):
+            # Determine best date format based on data range
+            date_range = (plot_data[config.x_column].max() - plot_data[config.x_column].min()).days
+            
+            if date_range <= 7:  # Week or less
+                tick_format = '%m-%d'
+                dtick = 'D1'  # Daily ticks
+            elif date_range <= 60:  # 2 months or less
+                tick_format = '%m-%d'
+                dtick = 'D7'  # Weekly ticks
+            elif date_range <= 365:  # Year or less
+                tick_format = '%Y-%m'
+                dtick = 'M1'  # Monthly ticks
+            else:  # More than a year
+                tick_format = '%Y'
+                dtick = 'M3'  # Quarterly ticks
+            
+            fig.update_xaxes(
+                tickformat=tick_format,
+                dtick=dtick,
+                tickangle=-45
+            )
+        
+        # Apply chart parameters
+        chart_params = config.chart_params or {}
+        if 'line_shape' in chart_params:
+            fig.update_traces(line_shape=chart_params['line_shape'])
+        if 'fill' in chart_params:
+            fig.update_traces(fill=chart_params['fill'])
+        
         return fig
+
 
     def _create_pie_chart(self, config: ChartConfig, data: pd.DataFrame, color_palette: str) -> go.Figure:
-        """Create pie chart"""
+        """Create pie chart with proper data type handling"""
         colors = self.color_palettes.get(color_palette, self.color_palettes['professional'])
+        
+        # Make a copy and ensure data types are correct
+        plot_data = data.copy()
+        
+        try:
+            # Convert values column to numeric, handling string numbers
+            if config.y_column in plot_data.columns:
+                # First, try to convert string numbers to float
+                plot_data[config.y_column] = pd.to_numeric(plot_data[config.y_column], errors='coerce')
+                
+                # Remove any NaN values that couldn't be converted
+                plot_data = plot_data.dropna(subset=[config.y_column])
+                
+                # Take absolute values (now they're numbers)
+                plot_data[config.y_column] = plot_data[config.y_column].abs()
+                
+                # Remove zero or negative values
+                plot_data = plot_data[plot_data[config.y_column] > 0]
+            
+            # Limit to top 10 for readability
+            if len(plot_data) > 10:
+                plot_data = plot_data.nlargest(10, config.y_column)
+            
+            if plot_data.empty:
+                return self._create_error_chart("No valid numeric data available for pie chart")
+            
+            # Clean up names column (remove extra spaces)
+            if config.x_column in plot_data.columns:
+                plot_data[config.x_column] = plot_data[config.x_column].astype(str).str.strip()
+            
+            fig = px.pie(
+                plot_data,
+                names=config.x_column,
+                values=config.y_column,
+                title=config.title,
+                color_discrete_sequence=colors
+            )
+            
+            # Add percentage labels and make it a donut chart
+            fig.update_traces(
+                textposition='inside', 
+                textinfo='percent+label',
+                hovertemplate='<b>%{label}</b><br>Value: %{value:,.0f}<br>Percentage: %{percent}<extra></extra>',
+                hole=0.3  # Donut chart
+            )
+            
+            return fig
+            
+        except Exception as e:
+            return self._create_error_chart(f"Pie chart error: {str(e)}")
 
-        fig = px.pie(
-            data,
-            names=config.x_column,
-            values=config.y_column,
-            title=config.title,
-            color_discrete_sequence=colors
-        )
 
-        # Apply hole for donut chart if configured
-        if config.chart_params and 'hole' in config.chart_params:
-            fig.update_traces(hole=config.chart_params['hole'])
 
-        return fig
 
     def _create_scatter_chart(self, config: ChartConfig, data: pd.DataFrame, color_palette: str) -> go.Figure:
         """Create scatter plot"""

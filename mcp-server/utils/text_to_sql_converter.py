@@ -4,6 +4,9 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+import re
+import asyncio
+import httpx
 
 # --- Load environment ---
 load_dotenv()
@@ -89,42 +92,6 @@ Keep the response professional, concise, and aligned with the exact question —
 """
 }
 
-# --- SQL Generation Prompt (insert full prompt from your code here as needed) ---
-SQL_GENERATION_PROMPT = """
-You are an expert SQL generator for the Förlagssystem AB database.
-Use the provided DATABASE_SCHEMA strictly.
-
-Core Objective:
-Generate SQL queries that answer only the actual user question. Do not include data, fields, or tables unrelated to their request—even if they match the user's general interests or preferences. Avoid substituting requested data with information from other domains.
-
-Guidelines:
-1. Only include tables, columns, and joins explicitly required to answer the user’s question.
-2. Always use clear table aliases (e.g., `OHKORDHR o`, `ORKORDRR r`).
-3. Use INNER JOIN for required relations, LEFT JOIN for optional, only as needed.
-4. Filter for active records (KHSTS='1', AHSTS='1', LHSTS='1') unless otherwise specified.
-5. Dates must be in numeric YYYYMMDD format; use >= and <= for ranges.
-6. When grouping, provide SUM and COUNT as requested, and always include appropriate GROUP BY clauses.
-7. Include only essential fields directly related to the user's query (e.g., customer name, article name, order number, invoice amount), unless more detail is specifically requested.
-8. Output valid, DB2-compatible standard SQL only.
-
-Rules:
-- Give priority to active customers/products/suppliers by default.
-- When displaying amounts, include currency (e.g., SEK) when possible.
-- Only join KRKFAKTR or KIINBETR for payment/invoice information if the user explicitly requests it.
-- Respect any date range or other filters the user provides.
-- Always output valid SQL with necessary GROUP BY and ORDER BY clauses.
-- Do not modify user requests based on previous queries unless clarifying ambiguous intent.
-- If the query is outside the database’s scope, output a clear, concise error message.
-- If SQL generation fails, retry up to three times unless it is a restricted access case; after three tries, return the error message.
-
-Output Policy:
-- Generate only the SQL query. Do not provide explanations unless explicitly asked by the user.
-
-Remember:
-- Never introduce unrelated information or substitute an answer from your own domain if the user's question is about another area.
-- If user context (preferences, history) is known, use it only to clarify ambiguous asks, NOT to adjust clear requests.
-"""
-
 # Get current date for queries
 TODAY = datetime(2025, 9, 10)
 TODAY_STR = TODAY.strftime("%Y%m%d")
@@ -143,6 +110,52 @@ LAST_MONTH_START = last_month_end.replace(day=1).strftime("%Y%m%d")
 
 # Year start
 YEAR_START = TODAY.replace(month=1, day=1).strftime("%Y%m%d")
+
+# --- SQL Generation Prompt (insert full prompt from your code here as needed) ---
+SQL_GENERATION_PROMPT = """
+You are an expert SQL generator for the Förlagssystem AB database running on DB2 for AS400.
+
+CRITICAL DB2 AS400 RULES:
+1. NEVER use parameter placeholders like :parameter_name, ?, or @parameter
+2. NEVER use WEEK(), MONTH(), YEAR(), DATEPART(), or EXTRACT() functions - they are NOT supported
+3. ALL dates are stored as numeric YYYYMMDD format (e.g., 20251008)
+4. Use direct numeric comparison for date ranges: column >= 20251001 AND column <= 20251031
+5. Use the pre-calculated date ranges provided in the schema (THIS_WEEK, THIS_MONTH, etc.)
+6. For text searches, use UPPER(column) LIKE '%SEARCHTERM%' with hardcoded values
+
+Date Query Examples:
+- "this week": WHERE OHDAO >= {WEEK_START} AND OHDAO <= {WEEK_END}
+- "this month": WHERE OHDAO >= {TODAY.replace(day=1).strftime("%Y%m%d")} AND OHDAO <= {MONTH_END.replace('-', '')}
+- "today": WHERE OHDAO = {TODAY_STR}
+
+Core Objective:
+Generate SQL queries that answer only the actual user question using DB2 AS400 compatible syntax.
+
+Guidelines:
+1. Only include tables, columns, and joins explicitly required to answer the user's question.
+2. Always use clear table aliases (e.g., `OHKORDHR o`, `ORKORDRR r`).
+3. Use INNER JOIN for required relations, LEFT JOIN for optional, only as needed.
+4. Filter for active records (KHSTS='1', AHSTS='1', LHSTS='1') unless otherwise specified.
+5. Dates must be in numeric YYYYMMDD format; use >= and <= for ranges.
+6. When grouping, provide SUM and COUNT as requested, and always include appropriate GROUP BY clauses.
+7. Include only essential fields directly related to the user's query.
+8. Output valid, DB2 for AS400 compatible SQL only.
+9. NEVER use parameter placeholders - always use hardcoded values in WHERE clauses.
+
+Rules:
+- Give priority to active customers/products/suppliers by default.
+- When displaying amounts, include currency (e.g., SEK) when possible.
+- Only join KRKFAKTR or KIINBETR for payment/invoice information if the user explicitly requests it.
+- Respect any date range or other filters the user provides.
+- Always output valid SQL with necessary GROUP BY and ORDER BY clauses.
+- Use FETCH FIRST n ROWS ONLY instead of LIMIT.
+- For follow-up questions that reference previous results, use specific values from context.
+
+Output Policy:
+- Generate only the SQL query. Do not provide explanations unless explicitly asked by the user.
+- NEVER use unsupported date functions.
+- NEVER use parameter placeholders.
+"""
 
 
 # --- Database Schema (copy from your expanded code) ---
@@ -316,8 +329,8 @@ Stock Fields:
 - AHRES: Reserved Stock (DECIMAL)
 
 Pricing Fields:
-- AHTPR: Sales Price (DECIMAL) 
-- AHPRE: Purchase Price (DECIMAL) 
+- AHTPR: Sales Price (DECIMAL)
+- AHPRE: Purchase Price (DECIMAL)
 
 ---
 
@@ -440,7 +453,7 @@ Core Fields:
 ### Example 1: Orders This Week
 Question: "Show me all orders from this week"
 SQL:
-SELECT 
+SELECT
     o.OHONR AS Order_Number,
     o.OHKNR AS Customer_Number,
     k.KHFKN AS Customer_Name,
@@ -449,7 +462,7 @@ SELECT
     o.OHVAL AS Currency
 FROM DCPO.OHKORDHR o
 INNER JOIN DCPO.KHKNDHUR k ON o.OHKNR = k.KHKNR
-WHERE o.OHDAO >= {week_start} 
+WHERE o.OHDAO >= {week_start}
   AND o.OHDAO <= {week_end}
   AND k.KHSTS = '1'
 ORDER BY o.OHDAO DESC
@@ -460,7 +473,7 @@ FETCH FIRST 100 ROWS ONLY
 ### Example 2: Top 10 Customers by Order Value
 Question: "Show top 10 customers by total order value this month"
 SQL:
-SELECT 
+SELECT
     k.KHKNR AS Customer_Number,
     k.KHFKN AS Customer_Name,
     COUNT(DISTINCT o.OHONR) AS Total_Orders,
@@ -469,7 +482,7 @@ SELECT
 FROM DCPO.KHKNDHUR k
 INNER JOIN DCPO.OHKORDHR o ON k.KHKNR = o.OHKNR
 WHERE k.KHSTS = '1'
-  AND o.OHDAO >= {month_start} 
+  AND o.OHDAO >= {month_start}
   AND o.OHDAO <= {month_end}
 GROUP BY k.KHKNR, k.KHFKN, o.OHVAL
 ORDER BY Total_Amount DESC
@@ -480,7 +493,7 @@ FETCH FIRST 10 ROWS ONLY
 ### Example 3: Article Sales with Details
 Question: "Show article details with total ordered and delivered quantities"
 SQL:
-SELECT 
+SELECT
     a.AHANR AS Article_Number,
     a.AHBES AS Article_Name,
     ay.AYTIT AS Title,
@@ -504,7 +517,7 @@ FETCH FIRST 20 ROWS ONLY
 ### Example 4: Customer Search by Name
 Question: "Find customers with name containing 'Andersson'"
 SQL:
-SELECT 
+SELECT
     KHKNR AS Customer_Number,
     KHFKN AS Customer_Name,
     KHFA1 AS Address,
@@ -521,7 +534,7 @@ FETCH FIRST 50 ROWS ONLY
 ### Example 5: Sales Statistics by Period
 Question: "Show sales statistics for last month"
 SQL:
-SELECT 
+SELECT
     a.AHANR AS Article_Number,
     a.AHBES AS Article_Name,
     SUM(w.WSDEBA) AS Total_Quantity_Sold,
@@ -583,24 +596,95 @@ FETCH FIRST 25 ROWS ONLY
 
 
 def clean_sql_output(sql: str) -> str:
-    """Cleans AI-generated SQL by removing markdown fences and formatting."""
+    """Cleans AI-generated SQL by removing markdown fences, language hints, and extra text."""
     if not sql:
         return ""
-    return sql.replace("``````", "").strip().rstrip(';')
+
+    # Remove markdown fences and language hints (```sql, ```SQL, ```python, etc.)
+    sql = re.sub(r"```(?:sql|SQL|python|[\w-]*)?", "", sql)
+    sql = re.sub(r"```", "", sql)
+
+    # Remove any trailing text after SQL (like explanations)
+    sql = re.split(r"(?i)explanation:|note:|output:", sql)[0]
+
+    # Strip whitespace and trailing semicolons
+    return sql.strip().rstrip(';')
+
+
 
 def generate_sql(question: str, username: str, conversation_history=None, role_context_override="") -> str:
-    """Generate SQL using context, role, and conversation memory (conversation_history can be None or list)."""
-    # Get role-based context, override as needed
+    """Generate SQL using context, role, and conversation memory with value extraction"""
+    
+    # Get role-based context
     role_ctx = role_context_override or ROLE_PROMPTS.get(username, "")
+    
+    # Enhanced chat context with value extraction
     chat_context = ""
-    if conversation_history:
-        chat_context = f"Previous conversation context (last 4 exchanges): {conversation_history[-8:] if len(conversation_history) > 8 else conversation_history}"
+    extracted_values = {}
+    
+    if conversation_history and len(conversation_history) > 0:
+        recent_history = conversation_history[-12:] if len(conversation_history) > 12 else conversation_history
+        
+        # Extract specific values from previous responses
+        for entry in recent_history:
+            if "Assistant:" in entry:
+                # Extract customer names, numbers, IDs etc.
+                import re
+                
+                # Extract customer numbers
+                customer_numbers = re.findall(r'Customer Number[:\s]*(\d+)', entry, re.IGNORECASE)
+                if customer_numbers:
+                    extracted_values['customer_numbers'] = customer_numbers
+                
+                # Extract customer names
+                customer_names = re.findall(r'Customer Name[:\s]*([^,\n]+)', entry, re.IGNORECASE)
+                if customer_names:
+                    extracted_values['customer_names'] = [name.strip() for name in customer_names]
+                
+                # Extract specific names mentioned (like "Camila")
+                name_matches = re.findall(r'(?:Customer Name[:\s]*|Address for Customer\s+)([A-Z][a-zA-Z\s]+)', entry)
+                if name_matches:
+                    extracted_values['mentioned_names'] = [name.strip() for name in name_matches]
+        
+        # Build enhanced context
+        chat_context = f"""
+        Previous conversation context:
+        {chr(10).join(recent_history)}
+
+        Extracted values from context:
+        {extracted_values}
+
+        Current follow-up question context:
+        - If the question references "her", "his", "their", "them", "this customer", etc., use the most recent customer from the context
+        - If asking about the same customer, use their specific customer number or name from above
+        - For follow-up questions, be specific and use exact values rather than parameters
+        """
+    
+    # Special handling for follow-up questions
+    follow_up_indicators = ['her', 'his', 'their', 'them', 'this customer', 'that customer', 'what is', 'what are']
+    is_follow_up = any(indicator in question.lower() for indicator in follow_up_indicators)
+    
+    if is_follow_up and extracted_values:
+        if 'mentioned_names' in extracted_values and extracted_values['mentioned_names']:
+            # Use the most recent mentioned name
+            recent_name = extracted_values['mentioned_names'][-1]
+            chat_context += f"\n\nIMPORTANT: This is a follow-up question about '{recent_name}'. Use this exact name in your WHERE clause like: UPPER(k.KHFKN) LIKE '%{recent_name.upper()}%'"
+        elif 'customer_numbers' in extracted_values and extracted_values['customer_numbers']:
+            # Use the most recent customer number
+            recent_number = extracted_values['customer_numbers'][-1]
+            chat_context += f"\n\nIMPORTANT: This is a follow-up question about customer number {recent_number}. Use: k.KHKNR = '{recent_number}'"
+
     sql_prompt = f"""{role_ctx}
-{chat_context}
-Current user question: "{question}"
-DATABASE SCHEMA: {DATABASE_SCHEMA}
-Generate SQL following the rules in the system prompt. Include JOINs for comprehensive data. Return ONLY the SQL query.
-"""
+
+    {chat_context}
+
+    Current user question: "{question}"
+
+    DATABASE SCHEMA: {DATABASE_SCHEMA}
+
+    Generate SQL following the rules in the system prompt. If this is a follow-up question, use the specific values from context. NEVER use parameter placeholders. Return ONLY the SQL query.
+    """
+
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -609,5 +693,109 @@ Generate SQL following the rules in the system prompt. Include JOINs for compreh
         ],
         temperature=0.1
     )
+
     sql = response.choices[0].message.content.strip()
     return clean_sql_output(sql)
+
+
+async def get_database_conversation_history(session_id: str, username: str, max_messages: int = 10):
+    """
+    Get conversation history from database for both chat and chart assistants
+    """
+    conversation_history = []
+    
+    if not session_id:
+        return conversation_history
+    
+    try:
+        # Get recent messages from database API
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{GATEWAY_URL}/api/conversation/get-messages/{session_id}",
+                headers={
+                    "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                    "X-Username": username
+                },
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                db_messages = response.json()
+                
+                # Convert to conversation history format (last N messages)
+                recent_messages = db_messages[-max_messages:] if len(db_messages) > max_messages else db_messages
+                
+                for msg in recent_messages:
+                    if msg['message_type'] == 'user':
+                        conversation_history.append(f"User: {msg['message_content']}")
+                    elif msg['message_type'] == 'assistant':
+                        # Include first 200 chars of response for context
+                        response_summary = msg['message_content'][:200] + "..." if len(msg['message_content']) > 200 else msg['message_content']
+                        conversation_history.append(f"Assistant: {response_summary}")
+                
+                print(f"DEBUG: Loaded {len(conversation_history)} messages from database for user {username}")
+                print(f"DEBUG: Recent context: {conversation_history[-3:] if conversation_history else 'None'}")
+                
+    except Exception as e:
+        print(f"Warning: Could not load database history for session {session_id}: {e}")
+    
+    return conversation_history
+
+async def get_enhanced_conversation_context(session_id: str, username: str):
+    """
+    Get enhanced context including last SQL and query patterns
+    """
+    try:
+        # Get recent messages
+        conversation_history = await get_database_conversation_history(session_id, username)
+        
+        # Also get the last query context (from conversation_context table)
+        async with httpx.AsyncClient() as client:
+            context_response = await client.get(
+                f"{GATEWAY_URL}/api/conversation/get-context/{session_id}",
+                headers={
+                    "Authorization": f"Bearer {GATEWAY_TOKEN}", 
+                    "X-Username": username
+                },
+                timeout=10.0
+            )
+            
+            if context_response.status_code == 200:
+                context_data = context_response.json()
+                last_query = context_data.get("last_query", "")
+                last_sql = context_data.get("last_sql", "")
+                last_tables = context_data.get("last_tables_used", "")
+                
+                return {
+                    "conversation_history": conversation_history,
+                    "last_query": last_query,
+                    "last_sql": last_sql,
+                    "last_tables": last_tables
+                }
+            
+    except Exception as e:
+        print(f"Enhanced context error: {e}")
+    
+    return {
+        "conversation_history": [],
+        "last_query": "",
+        "last_sql": "",
+        "last_tables": ""
+    }
+
+def generate_sql_with_session_context(question: str, username: str, session_id: str = None, role_context_override: str = ""):
+    """
+    Generate SQL using database session context - works for both chat and chart assistants
+    """
+    
+    # Get conversation history from database if session_id provided
+    conversation_history = []
+    if session_id:
+        try:
+            # Run async function in sync context
+            conversation_history = asyncio.run(get_database_conversation_history(session_id, username))
+        except Exception as e:
+            print(f"Could not load session context: {e}")
+    
+    # Use existing generate_sql function with database history
+    return generate_sql(question, username, conversation_history, role_context_override)
