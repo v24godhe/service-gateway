@@ -176,6 +176,20 @@ Date Calculations:
 
 ---
 
+### Percentage Calculations (CRITICAL)
+When calculating percentages in DB2, you MUST cast to DECIMAL to avoid integer division:
+
+WRONG (returns 0):
+SUM(amount) / (SELECT SUM(amount) FROM table) * 100
+
+CORRECT:
+CAST(SUM(amount) AS DECIMAL(18,2)) / CAST((SELECT SUM(amount) FROM table) AS DECIMAL(18,2)) * 100 AS Percentage
+
+Or use this format:
+(SUM(amount) * 100.0) / NULLIF((SELECT SUM(amount) FROM table), 0) AS Percentage
+
+Always multiply by 100.0 (not 100) to force decimal division.
+
 ## General Rules
 
 ### Data Formats
@@ -857,26 +871,31 @@ async def get_database_conversation_history(session_id: str, username: str, max_
         return conversation_history
     
     try:
+        # Configure longer timeout for VPN connection
+        timeout_config = httpx.Timeout(
+            connect=10.0,
+            read=60.0,    # ⬅️ Increase from 10s to 60s
+            write=10.0,
+            pool=10.0
+        )
+        
         # Get recent messages from database API
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
             response = await client.get(
                 f"{GATEWAY_URL}/api/conversation/get-messages/{session_id}",
                 headers={
                     "Authorization": f"Bearer {GATEWAY_TOKEN}",
                     "X-Username": username
-                },
-                timeout=10.0
+                }
             )
             
             if response.status_code == 200:
                 result = response.json()
                 
-                # FIXED: Handle different response formats
+                # Handle different response formats
                 if isinstance(result, dict):
-                    # If response is wrapped in an object
                     db_messages = result.get('messages', result.get('data', []))
                 elif isinstance(result, list):
-                    # If response is direct list
                     db_messages = result
                 else:
                     print(f"Unexpected response type: {type(result)}")
@@ -884,7 +903,7 @@ async def get_database_conversation_history(session_id: str, username: str, max_
                 
                 print(f"✅ Loaded {len(db_messages)} messages from database")
                 
-                # Convert to conversation history format (last N messages)
+                # Get recent messages only (last N messages)
                 recent_messages = db_messages[-max_messages:] if len(db_messages) > max_messages else db_messages
                 
                 for msg in recent_messages:
@@ -892,7 +911,6 @@ async def get_database_conversation_history(session_id: str, username: str, max_
                         if msg['message_type'] == 'user':
                             conversation_history.append(f"User: {msg['message_content']}")
                         elif msg['message_type'] == 'assistant':
-                            # Include first 200 chars of response for context
                             response_summary = msg['message_content'][:200] + "..." if len(msg['message_content']) > 200 else msg['message_content']
                             conversation_history.append(f"Assistant: {response_summary}")
                     except (KeyError, TypeError) as e:
@@ -900,9 +918,11 @@ async def get_database_conversation_history(session_id: str, username: str, max_
                         continue
                 
                 print(f"✅ Parsed {len(conversation_history)} conversation turns")
-                if conversation_history:
-                    print(f"📝 Recent context preview: {conversation_history[-2:]}")
                 
+    except httpx.ReadTimeout:
+        print(f"⚠️ Timeout fetching conversation history for session {session_id}")
+        # Return empty history on timeout - system will work without context
+        
     except Exception as e:
         print(f"❌ Error loading conversation history: {e}")
         import traceback

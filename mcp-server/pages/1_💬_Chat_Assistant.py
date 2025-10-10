@@ -13,6 +13,9 @@ import os
 import uuid
 from datetime import datetime
 from utils.text_to_sql_converter import generate_sql, generate_sql_with_session_context, ROLE_PROMPTS
+from utils.query_executor import QueryExecutor
+from utils.system_manager import SystemManager
+
 load_dotenv()
 
 st.set_page_config(
@@ -21,6 +24,11 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+
+query_executor = QueryExecutor()
+system_manager = SystemManager()
+
 
 # Company colors and styling
 st.markdown("""
@@ -655,6 +663,22 @@ else:
         st.markdown(f"<h1>Chat with AI Assistant</h1>", unsafe_allow_html=True)
         st.markdown(f"Hi **{st.session_state.username.upper()}**, I'm your assistant today. I can help you with STYR data.")
 
+
+    # System selector
+    available_systems = system_manager.get_available_systems()
+    if 'selected_system' not in st.session_state:
+        st.session_state.selected_system = "STYR"
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🗄️ Database System")
+    selected_system = st.sidebar.selectbox(
+        "Active System",
+        available_systems,
+        index=available_systems.index(st.session_state.selected_system),
+        key="system_selector"
+    )
+    st.session_state.selected_system = selected_system
+
     st.markdown("---")
 
     # Display chat history
@@ -697,7 +721,7 @@ else:
                 if not sql.strip().upper().startswith("SELECT"):
                     response = "I can only retrieve information from the system; I can't perform any other operations at the moment."
                 else:
-                    result = asyncio.run(execute_query(sql, st.session_state.username))
+                    result = query_executor.execute_sync(sql, st.session_state.username, st.session_state.selected_system)
                     if result.get("success"):
                         rows = result["data"]["rows"]
                         if len(rows) == 0:

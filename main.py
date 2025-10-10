@@ -38,6 +38,32 @@ import logging
 from services.permission_management_service import PermissionManagementService
 from typing import List
 from fastapi import Body, Header
+import pyodbc
+SYSTEM_CONFIGS = {
+    'STYR': {
+        'type': 'DB2',
+        'dsn': 'STYR_CONNECTION',
+        'password': 'FS2'
+    },
+    'JEEVES': {
+        'type': 'DB2',
+        'dsn': 'JEEVES_DSN',  # You'll provide
+        'password': 'PASSWORD'  # You'll provide
+    },
+    'ASTRO': {
+        'type': 'MSSQL',
+        'dsn': 'ASTRO_DSN',  # You'll provide
+        'password': 'PASSWORD'  # You'll provide
+    }
+}
+
+def get_db_connection(system_id: str):
+    """Get database connection for specified system"""
+    config = SYSTEM_CONFIGS.get(system_id.upper())
+    if not config:
+        raise ValueError(f"Unknown system: {system_id}")
+    
+    return pyodbc.connect(f"DSN={config['dsn']};PWD={config['password']}")
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -110,6 +136,23 @@ def _is_followup_question(question: str) -> bool:
     
     return any(indicator in question_lower for indicator in followup_indicators)
 
+@app.post("/api/{system_id}/execute-query")
+async def execute_query_multi(system_id: str, request: dict):
+    """Execute query on any system"""
+    try:
+        conn = get_db_connection(system_id)
+        cursor = conn.cursor()
+        cursor.execute(request['query'])
+        results = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        
+        return {
+            "success": True,
+            "data": [dict(zip(columns, row)) for row in results],
+            "system_id": system_id
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 def _extract_tables_from_sql(sql: str) -> List[str]:
     """Extract table names from SQL query"""
