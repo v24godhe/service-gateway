@@ -60,9 +60,31 @@ if prompt := st.chat_input("Ask for a business insight or chart..."):
     with st.chat_message("user"):
         st.write(prompt)
     
-    # Convert to SQL using database conversation context
+    # NEW: Get chart intelligence hints
+    import asyncio
+    from utils.chart_intelligence import analyze_chart_intent
+    
+    with st.spinner("Analyzing chart requirements..."):
+        chart_hints = asyncio.run(analyze_chart_intent(prompt, st.session_state.selected_system))
+    
+    # NEW: Enhance question with chart hints for SQL generation
+    enhanced_prompt = f"""{prompt}
+
+    [CHART SQL STRATEGY]:
+    - Chart Type: {chart_hints.get('chart_type', 'bar')}
+    - Needs Grouping: {chart_hints.get('needs_grouping', False)}
+    - Group By Type: {chart_hints.get('group_by_type', 'N/A')} (find appropriate date/category column in schema)
+    - Aggregation Function: {chart_hints.get('aggregation_function', 'COUNT')}
+    - Aggregation Field Type: {chart_hints.get('aggregation_field_hint', 'count')} (use amount/quantity columns from schema)
+    - Date Filter: {chart_hints.get('date_filter_needed', False)} - {chart_hints.get('date_range_hint', 'N/A')}
+    - Order: {chart_hints.get('order_direction', 'ASC')} with LIMIT {chart_hints.get('limit', 100)}
+
+    IMPORTANT: Use the correct column names from the DATABASE_SCHEMA, not the hints above.
+    """
+    
+    # Convert enhanced prompt to SQL using database conversation context
     sql_query = generate_sql_with_session_context(
-        prompt, 
+        enhanced_prompt, 
         st.session_state.username, 
         st.session_state.session_id
     )

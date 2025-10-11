@@ -30,8 +30,16 @@ class ChatChartIntegration:
             import asyncio
             data, columns = asyncio.run(self._fetch_data_from_api(sql_query, user_role, None, system_id))
 
-            if data is None or data.empty:
+            # Check if data is None or empty FIRST
+            if data is None:
+                return True, "❌ Query failed. Please check the error message and try again.", None
+
+            if data.empty:
                 return True, "I couldn't find any data to create a chart. Please try a different query.", None
+
+            if len(data) < 2:
+                if chart_type in ['line', 'bar']:
+                    return True, f"⚠️ Only {len(data)} record found. Charts need multiple data points.\n\n💡 Try:\n- 'daily totals last month'\n- 'group by date'\n- 'aggregate by category'", None
 
             print("ORIGINAL DATA:")
             print(f"Columns: {columns}")
