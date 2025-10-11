@@ -12,9 +12,8 @@ class QueryExecutor:
     async def execute_query(self, sql: str, username: str, system_id: str = "STYR") -> Dict[str, Any]:
         """Execute SQL query on specified system"""
         try:
-            gateway_url = self.system_manager.get_gateway_url(system_id)
-            if not gateway_url:
-                return {"success": False, "message": f"System {system_id} not found"}
+            # Use direct endpoint with system_id parameter
+            gateway_url = f"http://10.200.0.2:8080/api/execute-query?system_id={system_id}"
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(

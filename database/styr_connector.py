@@ -9,10 +9,10 @@ from utils.fallback import fallback_manager
 load_dotenv()
 
 class StyrDatabaseConnector(DatabaseConnector):
-    def __init__(self):
-        self.system = os.getenv('AS400_SYSTEM', 'your_as400_ip_or_name')
-        self.userid = os.getenv('AS400_USERID', 'your_username')
-        self.password = os.getenv('AS400_PASSWORD', 'FS25_XXXX')
+    def __init__(self, system=None, userid=None, password=None):
+        self.system = system or os.getenv('AS400_SYSTEM', os.getenv('STYR_SYSTEM'))
+        self.userid = userid or os.getenv('AS400_USERID', os.getenv('STYR_USERID'))
+        self.password = password or os.getenv('AS400_PASSWORD', os.getenv('STYR_PASSWORD'))
         self.connection = None
         self.connection_healthy = False
     

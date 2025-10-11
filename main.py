@@ -41,9 +41,8 @@ from fastapi import Body, Header
 import pyodbc
 SYSTEM_CONFIGS = {
     'STYR': {
-        'type': 'DB2',
         'dsn': 'STYR_CONNECTION',
-        'password': 'FS2'
+        'password': 'FS25_AS10'
     },
     'JEEVES': {
         'type': 'DB2',
@@ -136,23 +135,6 @@ def _is_followup_question(question: str) -> bool:
     
     return any(indicator in question_lower for indicator in followup_indicators)
 
-@app.post("/api/{system_id}/execute-query")
-async def execute_query_multi(system_id: str, request: dict):
-    """Execute query on any system"""
-    try:
-        conn = get_db_connection(system_id)
-        cursor = conn.cursor()
-        cursor.execute(request['query'])
-        results = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        
-        return {
-            "success": True,
-            "data": [dict(zip(columns, row)) for row in results],
-            "system_id": system_id
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
 
 def _extract_tables_from_sql(sql: str) -> List[str]:
     """Extract table names from SQL query"""
@@ -263,10 +245,29 @@ async def search_customers(
     )
 
 
+@app.post("/api/{system_id}/execute-query")
+async def execute_query_multi(system_id: str, request: dict):
+    """Execute query on any system"""
+    try:
+        conn = get_db_connection(system_id)
+        cursor = conn.cursor()
+        cursor.execute(request['query'])
+        results = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        
+        return {
+            "success": True,
+            "data": [dict(zip(columns, row)) for row in results],
+            "system_id": system_id
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
 @app.post("/api/execute-query")
-async def execute_query(query_request: DynamicQueryRequest, request: Request):
+async def execute_query(query_request: DynamicQueryRequest, request: Request, system_id: str = "STYR"):
     """Execute dynamic SQL query with conversation memory"""
     print("Query captured at API:", query_request.query)
+    
     # Get username from header
     username = request.headers.get("X-Username")
     if not username:
@@ -287,79 +288,64 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
     # Validate user access
     has_access, access_error = query_validator.validate_user_access(query_request.query, user)
     
-    # If access denied, create permission request
     if not has_access:
-        raise HTTPException(
-            status_code=403,
-            detail=access_error  # This already contains the request_id from query_validator
-        )
+        raise HTTPException(status_code=403, detail=access_error)
 
     # Add user message to conversation history
-    conversation.add_message('user', question)
+    conversation.add_message("user", question)
     
-    # Check if this is a follow-up question (contains pronouns or references)
+    # Detect if follow-up question
     is_followup = _is_followup_question(question)
     
-    # Enhance query with conversation context if it's a follow-up
-    # Get conversation context for AI (don't add to SQL)
-    context = None
-    if is_followup:
-        context = conversation.get_context_for_query()
-        if context:
-            print(f"Using context for session {session_id}: {context[:100]}")
-
-    # Step 1: Check cache first (use original question)
-    if query_learning_service:
-        try:
-            cached_result = query_learning_service.get_cached_query(question, user_role)
-            if cached_result:
-                # Add assistant response to conversation
-                conversation.add_message('assistant', 'Returned cached results')
-                
-                return {
-                    "success": True,
-                    "data": cached_result.get("result_json", {}),
-                    "source": "cache",
-                    "sql": cached_result.get("sql_query")
-                }
-        except Exception as e:
-            print(f"Cache lookup failed: {e}")
-    
-    # Step 2: Generate and execute query
     start_time = time.time()
     
     try:
-        # Execute query using existing query_service
-        result = await query_service.execute_dynamic_query(
-            query_request,
-            getattr(request.state, 'request_id', None)
+        # Step 1: Try cache first
+        cached_result = None
+        if query_learning_service and not is_followup:
+            cached_result = query_learning_service.get_cached_query(question, user_role)
+        
+        if cached_result:
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            conversation.add_message("assistant", f'Retrieved {len(cached_result.get("result_json", {}).get("rows", []))} cached results.')
+            
+            return {
+                "success": True,
+                "data": cached_result.get("result_json", {}),
+                "sql": cached_result.get("sql_query", ""),
+                "source": "cache",
+                "execution_time_ms": execution_time_ms,
+                "is_followup": is_followup
+            }
+        
+        # Step 2: Get system-specific connector
+        from database.connector_factory import DatabaseConnectorFactory
+        db_connector = DatabaseConnectorFactory.get_connector(system_id)
+        
+        # Create query service with this connector
+        query_service_temp = QueryService(db_connector)
+        
+        # Step 3: Execute query using temporary service
+        result = await query_service_temp.execute_dynamic_query(
+            query_request, 
+            session_id, 
+            username
         )
         
         execution_time_ms = int((time.time() - start_time) * 1000)
         success = result.get("success", False)
         
         if success:
-            # Extract tables used from SQL
-            sql_generated = result.get("sql", "")
-            tables_used = _extract_tables_from_sql(sql_generated)
+            tables_used = ', '.join(_extract_tables_from_sql(result.get("sql", "")))
             row_count = len(result.get("data", {}).get("rows", []))
             
-            # Update conversation context
-            conversation.update_query_context(
-                query=question,
-                sql=sql_generated,
-                result_count=row_count,
-                tables=tables_used
-            )
-            
-            # Add assistant response to conversation
             conversation.add_message(
-                'assistant',
-                f'Query executed successfully. {row_count} results.',
-                {'sql': sql_generated, 'tables': tables_used}
+                "assistant",
+                f'Query executed successfully. Found {row_count} results.',
+                {'sql': result.get("sql", ""), 'tables': tables_used}
             )
         
-        # Step 3: Log query execution
+        # Step 4: Log query execution
         if query_learning_service:
             try:
                 sql_generated = result.get("sql", "")
@@ -369,7 +355,7 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
                 query_learning_service.log_query(
                     user_id=username,
                     user_role=user_role,
-                    question=question,  # Use original question, not enhanced
+                    question=question,
                     sql_generated=sql_generated,
                     execution_time_ms=execution_time_ms,
                     success=success,
@@ -378,17 +364,17 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
                     session_id=session_id
                 )
                 
-                # Step 4: Cache successful results
+                # Step 5: Cache successful results
                 if success and row_count > 0:
                     query_learning_service.save_to_cache(
-                        question=question,  # Use original question
+                        question=question,
                         user_role=user_role,
                         sql_query=sql_generated,
                         result_data=result.get("data", {}),
                         ttl_minutes=int(os.getenv("QUERY_CACHE_TTL_MINUTES", 60))
                     )
                 
-                # Step 5: Update performance metrics
+                # Step 6: Update performance metrics
                 query_learning_service.update_performance(
                     question=question,
                     user_role=user_role,
@@ -399,6 +385,7 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
         
         result["source"] = "database"
         result["is_followup"] = is_followup
+        result["system_id"] = system_id  # Add system_id to response
         return result
         
     except Exception as e:
@@ -420,54 +407,6 @@ async def execute_query(query_request: DynamicQueryRequest, request: Request):
                 pass
         
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/query-suggestions")
-async def get_query_suggestions(request: Request, limit: int = 5):
-    """Get query suggestions based on user role"""
-    
-    if not query_learning_service:
-        return {"suggestions": []}
-    
-    username = request.headers.get("X-Username")
-    if not username:
-        raise HTTPException(status_code=401, detail="Username required")
-    
-    user = get_user(username)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid user")
-    
-    try:
-        suggestions = query_learning_service.get_query_suggestions(
-            user_role=user.role.value,
-            limit=limit
-        )
-        return {"suggestions": suggestions}
-    except Exception as e:
-        return {"suggestions": [], "error": str(e)}
-
-
-@app.get("/api/cache-stats")
-async def get_cache_statistics(request: Request):
-    """Get cache performance statistics (Admin only)"""
-    
-    if not query_learning_service:
-        return {"enabled": False, "message": "Query learning is disabled"}
-    
-    username = request.headers.get("X-Username")
-    if not username:
-        raise HTTPException(status_code=401, detail="Username required")
-    
-    # Only allow CEO to view stats
-    user = get_user(username)
-    if not user or user.role.value != "ceo":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    try:
-        stats = query_learning_service.get_cache_statistics()
-        stats["enabled"] = True
-        return stats
-    except Exception as e:
-        return {"enabled": True, "error": str(e)}
 
 
 @app.post("/api/clear-cache")
