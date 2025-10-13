@@ -893,7 +893,38 @@ def generate_sql(question: str, username: str, conversation_history=None, role_c
     )
 
     sql = response.choices[0].message.content.strip()
-    return clean_sql_output(sql)
+    sql = clean_sql_output(sql)
+
+    # Replace any remaining date placeholders in generated SQL
+    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    
+    # Calculate dates
+    week_start = (today - timedelta(days=today.weekday()))
+    week_end = (today + timedelta(days=6-today.weekday()))
+    month_start = today.replace(day=1)
+    
+    # Month end (last day of current month)
+    if today.month == 12:
+        month_end = today.replace(day=31)
+    else:
+        month_end = (today.replace(month=today.month+1, day=1) - timedelta(days=1))
+    
+    # Last month
+    last_month_end = (today.replace(day=1) - timedelta(days=1))
+    last_month_start = last_month_end.replace(day=1)
+    
+    year_start = today.replace(month=1, day=1)
+    sql = sql.replace('{today}', today.strftime("%Y%m%d"))
+    sql = sql.replace('{week_start}', week_start.strftime("%Y%m%d"))
+    sql = sql.replace('{week_end}', week_end.strftime("%Y%m%d"))
+    sql = sql.replace('{month_start}', month_start.strftime("%Y%m%d"))
+    sql = sql.replace('{month_end}', month_end.strftime("%Y%m%d"))
+    sql = sql.replace('{last_month_start}', last_month_start.strftime("%Y%m%d"))
+    sql = sql.replace('{last_month_end}', last_month_end.strftime("%Y%m%d"))
+    sql = sql.replace('{year_start}', year_start.strftime("%Y%m%d"))
+    return sql
 
 
 async def get_database_conversation_history(session_id: str, username: str, max_messages: int = 10):

@@ -37,10 +37,6 @@ class ChatChartIntegration:
             if data.empty:
                 return True, "I couldn't find any data to create a chart. Please try a different query.", None
 
-            if len(data) < 2:
-                if chart_type in ['line', 'bar']:
-                    return True, f"⚠️ Only {len(data)} record found. Charts need multiple data points.\n\n💡 Try:\n- 'daily totals last month'\n- 'group by date'\n- 'aggregate by category'", None
-
             print("ORIGINAL DATA:")
             print(f"Columns: {columns}")
             print(f"Data types: {data.dtypes.to_dict()}")
@@ -50,6 +46,10 @@ class ChatChartIntegration:
             chart_type = self._auto_detect_chart_type(data, columns, original_message)
             print("DETECTED CHART TYPE:", chart_type)
 
+            if len(data) < 2:
+                if chart_type in ['line', 'bar']:
+                    return True, f"⚠️ Only {len(data)} record found. Charts need multiple data points.\n\n💡 Try:\n- 'daily totals last month'\n- 'group by date'\n- 'aggregate by category'", None
+                
             # Step 4: Prepare data for the specific chart type
             prepared_data = self._prepare_data_for_chart(data, chart_type)
 
