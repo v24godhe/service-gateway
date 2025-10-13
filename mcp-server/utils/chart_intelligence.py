@@ -1,8 +1,27 @@
-import openai
+from openai import OpenAI
 import json
 import os
+from utils.prompt_manager import PromptManager
+from dotenv import load_dotenv
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+load_dotenv()
+
+_prompt_manager = None
+def get_prompt_manager():
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager()
+    return _prompt_manager
+
+def get_env_variable(var_name, default=None):
+    """Get env variable safely, with optional default."""
+    return os.getenv(var_name, default)
+
+OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY")
+GATEWAY_URL = get_env_variable("GATEWAY_URL")
+GATEWAY_TOKEN = get_env_variable("GATEWAY_TOKEN")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 async def analyze_chart_intent(question: str, system_id: str) -> dict:
     """
@@ -44,14 +63,14 @@ async def analyze_chart_intent(question: str, system_id: str) -> dict:
 
 
     try:
-        response = openai.chat.completions.create(
+        pm = get_prompt_manager()
+        chart_prompt = pm.get_prompt("STYR", 'CHART_INTELLIGENCE', None)
+
+        response = client.chat.completions.create(
             model="gpt-5",
             messages=[
-                {"role": "system", "content": "You are a SQL chart expert. Return only JSON."},
-                {"role": "user", "content": CHART_STRATEGY_PROMPT}
-            ]
+                {"role": "system", "content": chart_prompt}]
         )
-        
         content = response.choices[0].message.content.strip()
         
         # Remove markdown fences if present

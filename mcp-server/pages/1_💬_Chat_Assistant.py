@@ -15,8 +15,16 @@ from datetime import datetime
 from utils.text_to_sql_converter import generate_sql, generate_sql_with_session_context, ROLE_PROMPTS
 from utils.query_executor import QueryExecutor
 from utils.system_manager import SystemManager
+from utils.prompt_manager import PromptManager
 
 load_dotenv()
+
+_prompt_manager = None
+def get_prompt_manager():
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager()
+    return _prompt_manager
 
 st.set_page_config(
     page_title="Förlagssystem AI Assistant",
@@ -425,34 +433,32 @@ def handle_sql_generation(question: str, username: str):
     from utils.text_to_sql_converter import generate_sql_with_session_context
     
     session_id = st.session_state.get('session_id', None)
-    return generate_sql_with_session_context(question, username, session_id)
+    system_id = st.session_state.get('selected_system', 'STYR')
+    return generate_sql_with_session_context(question, username, session_id, system_id=system_id)
 
 def format_results(question: str, rows: list, username: str) -> str:
     """Format results based on role - NO unnecessary suggestions"""
+    pm = get_prompt_manager()
     
-    format_prompt = f"""User asked: "{question}"
-
-    Database results ({len(rows)} rows):
-    {rows}
-
-    Instructions:
-    1. Present the data clearly and professionally
-    2. Format numbers: 1,234,567 SEK for money, dates as readable text
-    3. Lead with the key answer or total
-    4. Be comprehensive but concise
-    5. DO NOT add suggestions, next steps, or additional analysis
-    6. Just present the facts directly and professionally
-    7. If dates are in YYYYMMDD format, convert to readable: 20251006 → October 6, 2025
-
-    Present the answer now:"""
+    # Load FORMAT_RESPONSE prompt from database
+    format_template = pm.get_prompt("STYR", 'FORMAT_RESPONSE', None)
+    
+    # Format the template with actual values
+    format_prompt = format_template.format(
+        question=question,
+        row_count=len(rows),  # Changed from len=len(rows)
+        rows=rows
+    )
+    
+    # Load role prompt from database
+    role_prompt = pm.get_prompt("STYR", 'ROLE_SYSTEM', username)
 
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-5",
         messages=[
-            {"role": "system", "content": ROLE_PROMPTS[username]},
+            {"role": "system", "content": role_prompt},
             {"role": "user", "content": format_prompt}
-        ],
-        temperature=0.3
+        ]
     )
     return response.choices[0].message.content
 

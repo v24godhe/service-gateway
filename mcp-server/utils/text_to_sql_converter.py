@@ -7,9 +7,20 @@ from datetime import datetime, timedelta
 import re
 import asyncio
 import httpx
+from utils.prompt_manager import PromptManager
 
 # --- Load environment ---
 load_dotenv()
+
+
+_prompt_manager = None
+def get_prompt_manager():
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager()
+    return _prompt_manager
+
+
 
 def get_env_variable(var_name, default=None):
     """Get env variable safely, with optional default."""
@@ -626,11 +637,15 @@ def clean_sql_output(sql: str) -> str:
 
 
 
-def generate_sql(question: str, username: str, conversation_history=None, role_context_override="") -> str:
+def generate_sql(question: str, username: str, conversation_history=None, role_context_override="", system_id: str = "STYR") -> str:
     """Generate SQL using UNIVERSAL context memory - remembers ALL entities and topics"""
     
-    # Get role-based context
-    role_ctx = role_context_override or ROLE_PROMPTS.get(username, "")
+    # Initialize prompt manager
+    pm = get_prompt_manager()
+    
+    # Load role prompt from database, fallback to hardcoded
+    role_ctx_from_db = pm.get_prompt(system_id, 'ROLE_SYSTEM', username)
+    role_ctx = role_context_override or role_ctx_from_db or ROLE_PROMPTS.get(username, "")
     
     # Universal entity extraction
     chat_context = ""
@@ -829,6 +844,24 @@ def generate_sql(question: str, username: str, conversation_history=None, role_c
     ACTION: Use the most relevant context from above based on the user's question.
     """
     
+    # Load schema from database, fallback to hardcoded
+    schema_from_db = pm.get_variable(system_id, 'DATABASE_SCHEMA')
+    schema_to_use = schema_from_db #if schema_from_db else DATABASE_SCHEMA
+
+
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    schema_to_use = schema_to_use.format(
+        today=today.strftime("%Y%m%d"),
+        week_start=(today - timedelta(days=today.weekday())).strftime("%Y%m%d"),
+        week_end=(today + timedelta(days=6-today.weekday())).strftime("%Y%m%d"),
+        month_start=today.replace(day=1).strftime("%Y%m%d"),
+        month_end=(today.replace(day=28) + timedelta(days=4)).replace(day=1).strftime("%Y%m%d") if today.month < 12 else today.replace(month=12, day=31).strftime("%Y%m%d"),
+        last_month_start=(today.replace(day=1) - timedelta(days=1)).replace(day=1).strftime("%Y%m%d"),
+        last_month_end=(today.replace(day=1) - timedelta(days=1)).strftime("%Y%m%d"),
+        year_start=today.replace(month=1, day=1).strftime("%Y%m%d")
+    )
+    
     # BUILD FINAL PROMPT
     sql_prompt = f"""{role_ctx}
 
@@ -838,7 +871,7 @@ def generate_sql(question: str, username: str, conversation_history=None, role_c
 
     CURRENT USER QUESTION: "{question}"
 
-    DATABASE SCHEMA: {DATABASE_SCHEMA}
+    DATABASE SCHEMA: {schema_to_use}
 
     INSTRUCTIONS:
     1. If FOLLOW-UP DETECTED above, use that context in your SQL
@@ -848,13 +881,15 @@ def generate_sql(question: str, username: str, conversation_history=None, role_c
     Generate the SQL now:
     """
 
+    # Load SQL generation prompt from database, fallback to hardcoded
+    sql_gen_prompt = pm.get_prompt(system_id, 'SQL_GENERATION', None) or SQL_GENERATION_PROMPT
+
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model="gpt-5",
         messages=[
-            {"role": "system", "content": SQL_GENERATION_PROMPT},
+            {"role": "system", "content": sql_gen_prompt},
             {"role": "user", "content": sql_prompt}
-        ],
-        temperature=0.1
+        ]
     )
 
     sql = response.choices[0].message.content.strip()
