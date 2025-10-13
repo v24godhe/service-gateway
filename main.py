@@ -754,7 +754,50 @@ async def clear_conversation_session(session_id: str):
 
 # ========== END DATABASE CONVERSATION MEMORY ENDPOINTS ==========
 
-
+@app.get("/api/system/test-connection")
+async def test_system_connection(system_id: str):
+    """Test database connection for a system"""
+    
+    try:
+        # Load connection params from environment
+        system_var = f"{system_id}_SYSTEM"
+        userid_var = f"{system_id}_USERID"
+        password_var = f"{system_id}_PASSWORD"
+        driver_var = f"{system_id}_DRIVER"
+        
+        system = os.getenv(system_var)
+        userid = os.getenv(userid_var)
+        password = os.getenv(password_var)
+        driver = os.getenv(driver_var, "IBM i Access ODBC Driver")
+        
+        if not system or not userid or not password:
+            return {
+                "success": False,
+                "message": f"Missing connection params in .env: {system_var}, {userid_var}, {password_var}"
+            }
+        
+        # Try to connect
+        conn_str = f"DRIVER={{{driver}}};SYSTEM={system};UID={userid};PWD={password}"
+        
+        try:
+            conn = pyodbc.connect(conn_str, timeout=5)
+            conn.close()
+            
+            return {
+                "success": True,
+                "message": f"Successfully connected to {system_id} ({system})"
+            }
+        except pyodbc.Error as e:
+            return {
+                "success": False,
+                "message": f"Connection failed: {str(e)}"
+            }
+    
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Test error: {str(e)}"
+        }
 
 # Helth Checking
 
