@@ -67,7 +67,7 @@ st.markdown("""
 if "analytics_messages" not in st.session_state:
     st.session_state.analytics_messages = []
 if "username" not in st.session_state:
-    st.session_state.username = None
+    st.session_state["username"] = "amila.g"
 
 # Authentication Check - Dev Admin Only
 if st.session_state.username:

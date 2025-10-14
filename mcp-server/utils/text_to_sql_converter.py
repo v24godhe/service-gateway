@@ -632,6 +632,8 @@ def clean_sql_output(sql: str) -> str:
     # Remove any trailing text after SQL (like explanations)
     sql = re.split(r"(?i)explanation:|note:|output:", sql)[0]
 
+    sql = ''.join(char for char in sql if ord(char) >= 32 or char in '\t\n\r')
+
     # Strip whitespace and trailing semicolons
     return sql.strip().rstrip(';')
 

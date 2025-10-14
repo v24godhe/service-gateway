@@ -717,7 +717,7 @@ if st.session_state.username is None:
         st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
                  width=150)
     with col2:
-        st.markdown("<h1 style='text-align: center;'>AI Assistant</h1>", unsafe_allow_html=True)
+        st.markdown("<h3 style='text-align: center;'>AI Assistant</h3>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666;'>Select your account to get started</p>",
                    unsafe_allow_html=True)
 else:
@@ -726,8 +726,9 @@ else:
         st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
                  width=150)
     with col2:
-        st.markdown(f"<h1>Chat with AI Assistant</h1>", unsafe_allow_html=True)
-        st.markdown(f"Hi **{st.session_state.username.upper()}**, I'm your assistant today. I can help you with STYR data.")
+        st.markdown("<h3>")
+        st.markdown(f"<h3>Hi **{st.session_state.username.upper()}**, I'm your assistant today. I can help you with STYR data.</h3>")
+        st.markdown("</h3>")
 
 
 
