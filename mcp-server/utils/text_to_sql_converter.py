@@ -885,7 +885,7 @@ def generate_sql(question: str, username: str, conversation_history=None, role_c
     sql_gen_prompt = pm.get_prompt(system_id, 'SQL_GENERATION', None) or SQL_GENERATION_PROMPT
 
     response = client.chat.completions.create(
-        model="gpt-5",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": sql_gen_prompt},
             {"role": "user", "content": sql_prompt}

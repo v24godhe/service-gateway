@@ -67,7 +67,7 @@ async def analyze_chart_intent(question: str, system_id: str) -> dict:
         chart_prompt = pm.get_prompt("STYR", 'CHART_INTELLIGENCE', None)
 
         response = client.chat.completions.create(
-            model="gpt-5",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": chart_prompt}]
         )

@@ -43,65 +43,100 @@ st.markdown("""
 <style>
     :root {
         --primary-color: #0073AE;
-        --background-color: #f2f4f8;
         --secondary-bg: #0F2436;
+        --background-color: #F4F6FA;
         --text-color: #0F2436;
+        --radius: 12px;
     }
 
     .main {
-        background-color: #f2f4f8;
+        background-color: var(--background-color);
     }
 
-    .stButton>button {
-        background-color: #0073AE;
+    h1, h2, h3 {
+        color: var(--text-color);
+        font-weight: 700;
+    }
+
+    /* Chat Bubbles */
+    .user-message {
+        background: var(--primary-color);
         color: white;
-        border-radius: 8px;
-        padding: 0.5rem 2rem;
-        font-weight: 600;
-        border: none;
-        transition: all 0.3s;
+        padding: 1rem;
+        border-radius: var(--radius);
+        margin: 0.5rem 0;
+        max-width: 75%;
+        margin-left: auto;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        transition: all 0.2s ease;
     }
 
+    .assistant-message {
+        background: white;
+        padding: 1rem;
+        border-radius: var(--radius);
+        margin: 0.5rem 0;
+        max-width: 75%;
+        border-left: 5px solid var(--primary-color);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        transition: all 0.2s ease;
+    }
+
+    /* Buttons */
+    .stButton>button {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.5rem 1.5rem;
+        transition: all 0.2s ease;
+    }
     .stButton>button:hover {
         background-color: #005a8a;
         transform: translateY(-2px);
     }
 
-    .user-message {
-        background-color: #0073AE;
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        margin-left: auto;
-    }
-
-    .assistant-message {
-        background-color: #ffffff;
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        border-left: 4px solid #0073AE;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    h1 {
-        color: #0F2436;
-        font-weight: 700;
-    }
-
+    /* Inputs */
     .stTextInput>div>div>input {
-        border-radius: 25px;
-        border: 2px solid #0073AE;
-        padding: 12px 20px;
+        border-radius: 30px;
+        border: 2px solid var(--primary-color);
+        padding: 0.8rem 1.2rem;
     }
 
-    button[kind="formSubmit"] {
-        display: none;
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: var(--secondary-bg);  /* ← DARK BLUE */
+        color: white;
+    }
+            
+    [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h1 {
+        color: white;
+    }
+
+    .metric-label, .metric-value {
+        color: white !important;
+    }
+            
+    /* Force white text in dark sidebar */
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+
+    [data-testid="stSidebar"] .stSelectbox label,
+    [data-testid="stSidebar"] .stButton button,
+    [data-testid="stSidebar"] .stMarkdown,
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span {
+        color: white !important;
+    }
+
+    [data-testid="stSidebar"] .stSelectbox > div > div {
+        background-color: rgba(255,255,255,0.1);
+        color: white;
     }
 </style>
+
 """, unsafe_allow_html=True)
 
 # Configuration
@@ -454,7 +489,7 @@ def format_results(question: str, rows: list, username: str) -> str:
     role_prompt = pm.get_prompt("STYR", 'ROLE_SYSTEM', username)
 
     response = client.chat.completions.create(
-        model="gpt-5",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": role_prompt},
             {"role": "user", "content": format_prompt}
@@ -493,18 +528,30 @@ async def export_to_excel(sql_query: str, username: str):
 # Sidebar
 with st.sidebar:
     # Navigation
-    st.markdown("### 🏠 Navigation")
-    if st.button("← Home", use_container_width=True):
-        st.switch_page("Home.py")
+    # st.markdown("### 🏠 Navigation")
+    # if st.button("← Home", use_container_width=True):
+    #     st.switch_page("Home.py")
     
-    st.markdown("---")
+    # st.markdown("---")
     
     # Logo
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
+    # st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
+    # st.markdown("---")
+            # System selector
+    available_systems = system_manager.get_available_systems()
+    if 'selected_system' not in st.session_state:
+        st.session_state.selected_system = "STYR"
+    selected_system = st.sidebar.selectbox(
+        "Active System",
+        available_systems,
+        index=available_systems.index(st.session_state.selected_system),
+        key="system_selector"
+    )
+    st.session_state.selected_system = selected_system
+
     st.markdown("---")
-    
+
     # Page Navigation
-    st.markdown("### 👤 USER FUNCTIONS")
     if st.button("💬 Chat Assistant", use_container_width=True, disabled=True):
         pass  # Current page
     if st.button("📊 Chart Assistant", use_container_width=True):
@@ -534,19 +581,15 @@ with st.sidebar:
                 initialize_chat_session()
                 st.rerun()
     else:
-        st.markdown(f"### 👤 Logged in as")
         st.markdown(f"**{st.session_state.username.upper()}**")
-        
         # Show current date context
-        st.markdown("---")
         st.markdown(f"**Today:** {TODAY.strftime('%B %d, %Y')}")
-        st.markdown(f"**This Week:** {datetime.strptime(WEEK_START, '%Y%m%d').strftime('%b %d')} - {datetime.strptime(WEEK_END, '%Y%m%d').strftime('%b %d')}")
 
         if st.button("Logout", use_container_width=True):
             st.session_state.username = None
             st.session_state.messages = []
-
         st.markdown("---")
+
         st.markdown("### 🧠 Memory Controls")
 
         # Show session info
@@ -669,13 +712,14 @@ with st.sidebar:
 
 # Main content
 if st.session_state.username is None:
-    col1, col2, col3 = st.columns([1,2,1])
+    col1, col2 = st.columns([1,4])
+    with col1:
+        st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
+                 width=150)
     with col2:
-        st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",use_container_width=True)
         st.markdown("<h1 style='text-align: center;'>AI Assistant</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666;'>Select your account to get started</p>",
                    unsafe_allow_html=True)
-
 else:
     col1, col2 = st.columns([1, 4])
     with col1:
@@ -686,22 +730,6 @@ else:
         st.markdown(f"Hi **{st.session_state.username.upper()}**, I'm your assistant today. I can help you with STYR data.")
 
 
-    # System selector
-    available_systems = system_manager.get_available_systems()
-    if 'selected_system' not in st.session_state:
-        st.session_state.selected_system = "STYR"
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### 🗄️ Database System")
-    selected_system = st.sidebar.selectbox(
-        "Active System",
-        available_systems,
-        index=available_systems.index(st.session_state.selected_system),
-        key="system_selector"
-    )
-    st.session_state.selected_system = selected_system
-
-    st.markdown("---")
 
     # Display chat history
     for msg in st.session_state.messages:
@@ -778,9 +806,9 @@ else:
                     else:
                         error_msg = result.get("message", "").lower()
                         if "permission" in error_msg or "access" in error_msg or "denied" in error_msg:
-                            response = "You don't have permission to access that information."
+                            response = {f"error_msg ", error_msg}
                         else:
-                            response = f"Query error. Please try rephrasing your question."
+                            response = f"No Data for you question. Please try rephrasing your question."
                             
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 save_message_to_database("assistant", response)
