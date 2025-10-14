@@ -2,6 +2,8 @@ import streamlit as st
 from utils.system_admin import SystemAdmin
 import httpx
 import asyncio
+import streamlit as st
+from utils.theme import THEMES
 
 st.set_page_config(page_title="System Management", layout="wide", page_icon="🗄")
 
@@ -14,17 +16,6 @@ if "username" not in st.session_state:
 
 # Sidebar
 with st.sidebar:
-    # Navigation
-    st.markdown("### 🏠 Navigation")
-    if st.button("← Home", use_container_width=True):
-        st.switch_page("Home.py")
-    
-    st.markdown("---")
-    
-    # Logo
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
-    st.markdown("---")
-    
     # Page Navigation
     st.markdown("### 🛠️ DEV ADMIN")
     if st.button("🎨 Prompt Management", use_container_width=True):
@@ -33,8 +24,10 @@ with st.sidebar:
         pass  # Current page
     if st.button("📈 Analytics", use_container_width=True):
         st.switch_page("pages/6_📈_Analytics_Chat_Assistant.py")
-    
+
     st.markdown("---")
+    theme_choice = st.sidebar.selectbox("🎨 Theme", list(THEMES.keys()))
+    st.markdown(THEMES[theme_choice], unsafe_allow_html=True)  
     
     # Login/User section
     if not st.session_state.username:
@@ -55,14 +48,15 @@ with st.sidebar:
         st.info("💡 Dev Admin: amila.g")
         st.stop()
     else:
-        st.markdown("### 👤 Dev Admin")
         st.success(f"👤 {st.session_state.username}")
         
         if st.button("Logout", use_container_width=True):
             st.session_state.username = None
             st.rerun()
 
-st.title("🗄 Database System Management")
+    # Theme selector
+ 
+st.title("🗄 System Management")
 st.markdown("---")
 
 # Tabs

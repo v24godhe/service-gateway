@@ -4,6 +4,8 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 import difflib
+import streamlit as st
+from utils.theme import THEMES
 
 load_dotenv('/home/azureuser/forlagssystem-mcp/.env')
 
@@ -223,17 +225,7 @@ def generate_diff_html(old_text, new_text):
 
 # Sidebar
 with st.sidebar:
-    # Navigation
-    st.markdown("### 🏠 Navigation")
-    if st.button("← Home", use_container_width=True):
-        st.switch_page("Home.py")
-    
-    st.markdown("---")
-    
-    # Logo
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
-    st.markdown("---")
-    
+   
     # Page Navigation
     st.markdown("### 🛠️ DEV ADMIN")
     if st.button("🎨 Prompt Management", use_container_width=True, disabled=True):
@@ -246,10 +238,11 @@ with st.sidebar:
     st.markdown("---")
     
     # User Info
-    st.markdown("### 👤 Dev Admin")
     st.success(f"👤 {st.session_state.username}")
     
-    # Keep existing prompt selector below this...
+    # Theme selector
+    theme_choice = st.sidebar.selectbox("🎨 Theme", list(THEMES.keys()))
+    st.markdown(THEMES[theme_choice], unsafe_allow_html=True)
 
 
 # Tab selection

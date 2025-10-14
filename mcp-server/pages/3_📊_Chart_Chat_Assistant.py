@@ -3,6 +3,11 @@ from utils.text_to_sql_converter import get_env_variable, generate_sql_with_sess
 from utils.chat_chart_integration import ChatChartIntegration, integrate_with_existing_chat
 from utils.query_executor import QueryExecutor
 from utils.system_manager import SystemManager
+import streamlit as st
+from utils.theme import THEMES
+
+import asyncio
+from utils.chart_intelligence import analyze_chart_intent
 
 OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY")
 
@@ -11,7 +16,6 @@ query_executor = QueryExecutor()
 system_manager = SystemManager()
 
 st.set_page_config(page_title="Chart Chat Assistant", layout="wide")
-st.title("📊 Chart Chat Assistant")
 
 # Initialize chat_integration with query_executor
 chat_integration = ChatChartIntegration(
@@ -30,19 +34,6 @@ if "username" not in st.session_state:
 
 # Sidebar
 with st.sidebar:
-    # Navigation
-    st.markdown("### 🏠 Navigation")
-    if st.button("← Home", use_container_width=True):
-        st.switch_page("Home.py")
-    
-    st.markdown("---")
-    
-    # Logo
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
-    st.markdown("---")
-    
-    # Page Navigation
-    st.markdown("### 👤 USER FUNCTIONS")
     if st.button("💬 Chat Assistant", use_container_width=True):
         st.switch_page("pages/1_💬_Chat_Assistant.py")
     if st.button("📊 Chart Assistant", use_container_width=True, disabled=True):
@@ -51,7 +42,6 @@ with st.sidebar:
     st.markdown("---")
     
     # User Info
-    st.markdown("### 👤 User")
     st.success(f"👤 {st.session_state.username}")
 
     # System selector
@@ -59,7 +49,6 @@ with st.sidebar:
         st.session_state.selected_system = "STYR"
 
     st.markdown("---")
-    st.markdown("### 🗄️ Database System")
     available_systems = system_manager.get_available_systems()
     selected_system = st.selectbox(
         "Active System",
@@ -69,6 +58,31 @@ with st.sidebar:
     )
     st.session_state.selected_system = selected_system
 
+    # Theme selector
+    theme_choice = st.sidebar.selectbox("🎨 Theme", list(THEMES.keys()))
+    st.markdown(THEMES[theme_choice], unsafe_allow_html=True)
+
+
+if st.session_state.username is None:
+    col1, col2 = st.columns([1,4])
+    with col1:
+        st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
+                 width=150)
+    with col2:
+        st.markdown("<h3 style='text-align: center;'>Chart Assistant</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #666;'>Select your account to get started</p>",
+                   unsafe_allow_html=True)
+else:
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
+                 width=150)
+    with col2:
+        st.markdown(
+            f"<h3>Hi <b>{st.session_state.username.upper()}</b>, I'm your chart assistant today. I can help you?.</h3>",
+            unsafe_allow_html=True
+        )
+
 # Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -76,21 +90,25 @@ for message in st.session_state.messages:
         if "chart" in message:
             st.plotly_chart(message["chart"], use_container_width=True)
 
-# Chat input
-if prompt := st.chat_input("Ask for a business insight or chart..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+# Chat input form
+with st.form(key='chat_form', clear_on_submit=True):
+    user_input = st.text_input(
+        "Ask me anything:",
+        placeholder="e.g., Ask for a business insight or chart...",
+        label_visibility="collapsed"
+    )
+    submitted = st.form_submit_button("Send")
+
+# Only run the logic after form submission
+if submitted and user_input:
     with st.chat_message("user"):
-        st.write(prompt)
-    
-    # NEW: Get chart intelligence hints
-    import asyncio
-    from utils.chart_intelligence import analyze_chart_intent
-    
+        st.write(user_input)
+
     with st.spinner("Analyzing chart requirements..."):
-        chart_hints = asyncio.run(analyze_chart_intent(prompt, st.session_state.selected_system))
-    
-    # NEW: Enhance question with chart hints for SQL generation
-    enhanced_prompt = f"""{prompt}
+        chart_hints = asyncio.run(analyze_chart_intent(user_input, st.session_state.selected_system))
+
+    # Enhance prompt for SQL generation
+    enhanced_prompt = f"""{user_input}
 
     [CHART SQL STRATEGY]:
     - Chart Type: {chart_hints.get('chart_type', 'bar')}
@@ -103,36 +121,38 @@ if prompt := st.chat_input("Ask for a business insight or chart..."):
 
     IMPORTANT: Use the correct column names from the DATABASE_SCHEMA, not the hints above.
     """
-    
-    # Convert enhanced prompt to SQL using database conversation context
+
+    # Generate SQL
     sql_query = generate_sql_with_session_context(
-        enhanced_prompt, 
-        st.session_state.username, 
+        enhanced_prompt,
+        st.session_state.username,
         st.session_state.session_id
     )
-    
-    print(f"USER PROMPT: {prompt}")
+
+    print(f"USER PROMPT: {user_input}")
     print(f"GENERATED SQL: {sql_query}")
     print(f"SYSTEM: {st.session_state.selected_system}")
-    
+
+    # Handle invalid SQL case
     if not sql_query or not sql_query.lower().startswith("select"):
         with st.chat_message("assistant"):
             response = "❗ Sorry, I couldn't convert your question to a valid SQL query."
             st.error(response)
-            st.session_state.messages.append({"role": "assistant", "content": response})
+        st.session_state.messages.append({"role": "assistant", "content": response})
+
     else:
-        # Pass SQL and system_id to chart integration
+        # Integrate SQL with chat/chart system
         chart_handled = integrate_with_existing_chat(
-            chat_integration, 
-            sql_query, 
-            user_role=st.session_state.username, 
-            original_message=prompt,
+            chat_integration,
+            sql_query,
+            user_role=st.session_state.username,
+            original_message=user_input,
             system_id=st.session_state.selected_system
         )
-        
+
         if not chart_handled:
             with st.chat_message("assistant"):
-                out = f"I understand you said: '{prompt}'. Try asking for a chart, e.g., 'Show me monthly revenue.'"
+                out = f"I understand you said: '{user_input}'. Try asking for a chart, e.g., 'Show me monthly revenue.'"
                 st.write(out)
             st.session_state.messages.append({"role": "assistant", "content": out})
 

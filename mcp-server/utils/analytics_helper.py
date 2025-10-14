@@ -206,3 +206,40 @@ def get_analytics_summary_text(results: dict) -> str:
     summary += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     
     return summary
+
+def generate_analytics_insights(prompt: str, data: list, username: str) -> str:
+    """Generate AI insights using OpenAI"""
+    import os
+    
+    # Initialize client (NEW way)
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    
+    data_preview = data[:5] if len(data) > 5 else data
+    columns = list(data[0].keys()) if data else []
+    
+    user_prompt = f"""
+Analyze this analytics query result:
+
+**User Question:** "{prompt}"
+**Total rows:** {len(data)}
+**Columns:** {', '.join(columns)}
+**Sample Data:** {data_preview}
+
+Provide clear insights in markdown with emojis.
+"""
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",  # Faster and cheaper than gpt-4
+            messages=[
+                {"role": "system", "content": "You are an analytics assistant."},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=800,
+            temperature=0.7
+        )
+        
+        return response.choices[0].message.content
+        
+    except Exception as e:
+        return f"📊 Found **{len(data)}** results for: *{prompt}*"

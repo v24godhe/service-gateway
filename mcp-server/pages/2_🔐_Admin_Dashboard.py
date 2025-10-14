@@ -8,8 +8,11 @@ import httpx
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import streamlit as st
+from utils.theme import THEMES
 
 load_dotenv()
+
 
 # Configuration
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://10.200.0.2:8080")
@@ -19,79 +22,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# Company colors and styling
-st.markdown("""
-<style>
-    :root {
-        --primary-color: #0073AE;
-        --background-color: #f2f4f8;
-        --secondary-bg: #0F2436;
-        --text-color: #0F2436;
-    }
-
-    .main {
-        background-color: #f2f4f8;
-    }
-
-    .stButton>button {
-        background-color: #0073AE;
-        color: white;
-        border-radius: 8px;
-        padding: 0.5rem 2rem;
-        font-weight: 600;
-        border: none;
-        transition: all 0.3s;
-    }
-
-    .stButton>button:hover {
-        background-color: #005a8a;
-        transform: translateY(-2px);
-    }
-
-    .approve-button>button {
-        background-color: #28a745;
-    }
-
-    .deny-button>button {
-        background-color: #dc3545;
-    }
-
-    h1, h2, h3 {
-        color: #0F2436;
-        font-weight: 700;
-    }
-
-    .metric-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 4px solid #0073AE;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .request-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        margin: 10px 0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        border-left: 4px solid #ffc107;
-    }
-
-    .approved-card {
-        border-left: 4px solid #28a745;
-    }
-
-    .denied-card {
-        border-left: 4px solid #dc3545;
-    }
-
-    .stTextInput>div>div>input {
-        border-radius: 8px;
-        border: 2px solid #0073AE;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # Session state initialization
 if 'admin_username' not in st.session_state:
@@ -206,18 +136,7 @@ def get_rbac_rules():
 
 # Sidebar
 with st.sidebar:
-    # Navigation
-    st.markdown("### 🏠 Navigation")
-    if st.button("← Home", use_container_width=True):
-        st.switch_page("Home.py")
-    
-    st.markdown("---")
-    
-    # Logo
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg",
-             use_container_width=True)
-    st.markdown("---")
-    
+   
     # Page Navigation Section
     st.markdown("### 🔐 SUPER ADMIN")
     if st.button("🔐 Admin Dashboard", use_container_width=True, disabled=True):
@@ -255,6 +174,9 @@ with st.sidebar:
             ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History"],
             label_visibility="collapsed"
         )
+    # Theme selector
+    theme_choice = st.sidebar.selectbox("🎨 Theme", list(THEMES.keys()))
+    st.markdown(THEMES[theme_choice], unsafe_allow_html=True)
 
 def memory_management_section():
     """Admin section for managing conversation memories"""
@@ -287,10 +209,11 @@ def memory_management_section():
 # Main content
 if not st.session_state.authenticated:
     col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+    with col1:
         st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
-                 use_container_width=True)
-        st.markdown("<h1 style='text-align: center;'>Permission Management</h1>", unsafe_allow_html=True)
+                 width=150)
+    with col2:
+        st.markdown("<h2 style='text-align: center;'>Permission Management</h2>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666;'>Super Admin access required</p>",
                    unsafe_allow_html=True)
 else:
@@ -309,19 +232,11 @@ else:
         page = "📋 Pending Requests"
 
 
-    # Find this line (around line 265):
-    page = st.radio(
-        "Select Page",
-        ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History"],
-        label_visibility="collapsed"
-    )
-
-    # REPLACE IT WITH:
-    page = st.radio(
-        "Select Page",
-        ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History", "🧠 Memory Management"],
-        label_visibility="collapsed"
-    )
+    # page = st.radio(
+    #     "Select Page",
+    #     ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History", "🧠 Memory Management"],
+    #     label_visibility="collapsed"
+    # )
 
     
     # ================================================================

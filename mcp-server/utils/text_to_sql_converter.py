@@ -633,7 +633,7 @@ def clean_sql_output(sql: str) -> str:
     sql = re.split(r"(?i)explanation:|note:|output:", sql)[0]
 
     sql = ''.join(char for char in sql if ord(char) >= 32 or char in '\t\n\r')
-
+    sql = sql.encode("utf-8", "ignore").decode("utf-8").replace("\x1a", "")
     # Strip whitespace and trailing semicolons
     return sql.strip().rstrip(';')
 

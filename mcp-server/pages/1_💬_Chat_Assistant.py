@@ -16,6 +16,8 @@ from utils.text_to_sql_converter import generate_sql, generate_sql_with_session_
 from utils.query_executor import QueryExecutor
 from utils.system_manager import SystemManager
 from utils.prompt_manager import PromptManager
+import streamlit as st
+from utils.theme import THEMES
 
 load_dotenv()
 
@@ -37,109 +39,6 @@ st.set_page_config(
 query_executor = QueryExecutor()
 system_manager = SystemManager()
 
-
-# Company colors and styling
-st.markdown("""
-<style>
-    :root {
-        --primary-color: #0073AE;
-        --secondary-bg: #0F2436;
-        --background-color: #F4F6FA;
-        --text-color: #0F2436;
-        --radius: 12px;
-    }
-
-    .main {
-        background-color: var(--background-color);
-    }
-
-    h1, h2, h3 {
-        color: var(--text-color);
-        font-weight: 700;
-    }
-
-    /* Chat Bubbles */
-    .user-message {
-        background: var(--primary-color);
-        color: white;
-        padding: 1rem;
-        border-radius: var(--radius);
-        margin: 0.5rem 0;
-        max-width: 75%;
-        margin-left: auto;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        transition: all 0.2s ease;
-    }
-
-    .assistant-message {
-        background: white;
-        padding: 1rem;
-        border-radius: var(--radius);
-        margin: 0.5rem 0;
-        max-width: 75%;
-        border-left: 5px solid var(--primary-color);
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        transition: all 0.2s ease;
-    }
-
-    /* Buttons */
-    .stButton>button {
-        background-color: var(--primary-color);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-weight: 600;
-        padding: 0.5rem 1.5rem;
-        transition: all 0.2s ease;
-    }
-    .stButton>button:hover {
-        background-color: #005a8a;
-        transform: translateY(-2px);
-    }
-
-    /* Inputs */
-    .stTextInput>div>div>input {
-        border-radius: 30px;
-        border: 2px solid var(--primary-color);
-        padding: 0.8rem 1.2rem;
-    }
-
-    /* Sidebar styling */
-    [data-testid="stSidebar"] {
-        background-color: var(--secondary-bg);  /* ← DARK BLUE */
-        color: white;
-    }
-            
-    [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h1 {
-        color: white;
-    }
-
-    .metric-label, .metric-value {
-        color: white !important;
-    }
-            
-    /* Force white text in dark sidebar */
-    [data-testid="stSidebar"] * {
-        color: white !important;
-    }
-
-    [data-testid="stSidebar"] .stSelectbox label,
-    [data-testid="stSidebar"] .stButton button,
-    [data-testid="stSidebar"] .stMarkdown,
-    [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] span {
-        color: white !important;
-    }
-
-    [data-testid="stSidebar"] .stSelectbox > div > div {
-        background-color: rgba(255,255,255,0.1);
-        color: white;
-    }
-</style>
-
-""", unsafe_allow_html=True)
-
-# Configuration
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 GATEWAY_URL = os.getenv("GATEWAY_URL")
 GATEWAY_TOKEN = os.getenv("GATEWAY_TOKEN")
@@ -527,17 +426,6 @@ async def export_to_excel(sql_query: str, username: str):
 
 # Sidebar
 with st.sidebar:
-    # Navigation
-    # st.markdown("### 🏠 Navigation")
-    # if st.button("← Home", use_container_width=True):
-    #     st.switch_page("Home.py")
-    
-    # st.markdown("---")
-    
-    # Logo
-    # st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
-    # st.markdown("---")
-            # System selector
     available_systems = system_manager.get_available_systems()
     if 'selected_system' not in st.session_state:
         st.session_state.selected_system = "STYR"
@@ -709,6 +597,8 @@ with st.sidebar:
         else:
             st.warning("⚠️ No data. Run query first.")
         # ========== END EXPORT BUTTONS ==========
+    theme_choice = st.sidebar.selectbox("🎨 Theme", list(THEMES.keys()))
+    st.markdown(THEMES[theme_choice], unsafe_allow_html=True)
 
 # Main content
 if st.session_state.username is None:
@@ -731,91 +621,110 @@ else:
             unsafe_allow_html=True
         )
 
-
-
-    # Display chat history
+    # ==== Display previous chat messages ====
     for msg in st.session_state.messages:
         if msg["role"] == "user":
-            st.markdown(f"<div class='user-message'>{msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='assistant-message'>{msg['content']}</div>", unsafe_allow_html=True)
+            with st.chat_message("user"):
+                st.write(msg["content"])
+        elif msg["role"] == "assistant":
+            with st.chat_message("assistant"):
+                st.write(msg["content"])
 
-    # Input form
+    # ==== Chat Input Form ====
     with st.form(key='chat_form', clear_on_submit=True):
         user_input = st.text_input(
             "Ask me anything:",
             placeholder="e.g., Show me this week's sales report",
             label_visibility="collapsed"
         )
-        submit = st.form_submit_button("Send")
+        submitted = st.form_submit_button("Send")
 
-    if submit and user_input:
-        # Initialize memory
+    # ==== Process Submission ====
+    if submitted and user_input:
         memory = initialize_conversation_memory()
-        
+
+        # Display user message immediately
+        with st.chat_message("user"):
+            st.write(user_input)
+
+        # Save locally + to DB
         st.session_state.messages.append({"role": "user", "content": user_input})
-        save_message_to_database("user", user_input) 
-        print("DEBUG: User question =", user_input)
+        save_message_to_database("user", user_input)
+        print(f"DEBUG: User question = {user_input}")
+
         with st.spinner("Analyzing..."):
             try:
-                # Generate SQL with conversation context
                 sql = generate_sql_with_session_context(
-                    user_input, 
+                    user_input,
                     st.session_state.username,
-                    st.session_state.get('session_id', None)
+                    st.session_state.get("session_id", None)
                 )
-                print(f"🔍 Session ID used for context: {st.session_state.get('session_id', 'NONE')}")
-                # DEBUG: Print what context was used
-                print(f"DEBUG - User question: {user_input}")
-                print(f"DEBUG - Session ID: {st.session_state.get('session_id', 'NONE')}")
-                print(f"DEBUG - Generated SQL: {sql}")
+                print(f"DEBUG SQL = {sql}")
 
-                if not sql.strip().upper().startswith("SELECT"):
-                    response = "I can only retrieve information from the system; I can't perform any other operations at the moment."
+                if not sql or not sql.strip().upper().startswith("SELECT"):
+                    response = (
+                        "I can only retrieve information from the system; "
+                        "I can't perform other operations at the moment."
+                    )
                 else:
-                    result = query_executor.execute_sync(sql, st.session_state.username, st.session_state.selected_system)
+                    result = query_executor.execute_sync(
+                        sql,
+                        st.session_state.username,
+                        st.session_state.selected_system
+                    )
+
                     if result.get("success"):
                         rows = result["data"]["rows"]
-                        if len(rows) == 0:
+                        if not rows:
                             response = "No data found matching your query."
                         else:
                             response = format_results(user_input, rows, st.session_state.username)
-                            
-                            # STORE LAST QUERY RESULT FOR EXPORT
                             st.session_state.last_query_sql = sql
                             st.session_state.last_query_rows = rows
                             st.session_state.last_query_question = user_input
-                            
-                            # Save to conversation memory
-                            memory.save_context(
-                                {"input": user_input},
-                                {"output": response}
-                            )
-                            # UPDATE CONVERSATION CONTEXT IN DATABASE - ADD THIS BLOCK
-                            if sql and sql.strip().upper().startswith("SELECT"):
-                                # Extract table names from SQL (simple extraction)
-                                tables_used = ""
-                                try:
-                                    if "FROM" in sql.upper():
-                                        sql_parts = sql.upper().split("FROM")[1].split("WHERE")[0].split("ORDER")[0].split("GROUP")[0]
-                                        tables_used = sql_parts.strip()[:200]  # Limit length
-                                except:
-                                    tables_used = "UNKNOWN"
-                                
-                                result_count = len(rows) if rows else 0
-                                update_conversation_context(user_input, sql, tables_used, result_count)
-                            # END OF ADDED BLOCK
+
+                            memory.save_context({"input": user_input}, {"output": response})
+
+                            # Update context in DB
+                            try:
+                                tables_used = "UNKNOWN"
+                                if "FROM" in sql.upper():
+                                    sql_parts = (
+                                        sql.upper()
+                                        .split("FROM")[1]
+                                        .split("WHERE")[0]
+                                        .split("ORDER")[0]
+                                        .split("GROUP")[0]
+                                    )
+                                    tables_used = sql_parts.strip()[:200]
+                            except Exception:
+                                pass
+
+                            result_count = len(rows)
+                            update_conversation_context(user_input, sql, tables_used, result_count)
                     else:
                         error_msg = result.get("message", "").lower()
-                        if "permission" in error_msg or "access" in error_msg or "denied" in error_msg:
-                            response = {f"error_msg ", error_msg}
+                        if any(x in error_msg for x in ["permission", "access", "denied"]):
+                            response = f"Access issue: {error_msg}"
                         else:
-                            response = f"No Data for you question. Please try rephrasing your question."
-                            
+                            response = "No data found. Please try rephrasing your question."
+
+                # Display assistant message immediately
+                with st.chat_message("assistant"):
+                    st.write(response)
+
+                # Save assistant message
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 save_message_to_database("assistant", response)
+
                 st.rerun()
+
             except Exception as e:
-                response = "An error occurred. Please try again."
+                print(f"ERROR: {e}")
+                response = "⚠️ An error occurred. Please try again."
+                with st.chat_message("assistant"):
+                    st.write(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 st.rerun()
+
+
