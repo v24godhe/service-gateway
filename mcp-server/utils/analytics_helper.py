@@ -71,6 +71,10 @@ RULES:
 6. Always include system_id in GROUP BY when aggregating
 7. Use TOP N for limiting results
 8. Order by relevant columns (timestamp DESC, execution_time_ms DESC, etc.)
+9. CRITICAL: Do NOT filter by user_id unless explicitly requested
+   - "my errors" → add user_id filter
+   - "errors today" → NO user_id filter (show all users)
+   - Admin sees all data by default
 
 Example Questions:
 - "What queries failed today?" → SELECT question, error_message, timestamp FROM query_history WHERE success = 0 AND CAST(timestamp AS DATE) = CAST(GETDATE() AS DATE)
@@ -99,9 +103,9 @@ def generate_analytics_sql(question: str, username: str = "dev_admin") -> str:
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": ANALYTICS_PROMPT + "\n\nDATABASE SCHEMA:\n" + ANALYTICS_SCHEMA},
-                {"role": "user", "content": f"User: {username}\nQuestion: {question}"}
+                {"role": "user", "content": question}
             ],
-            temperature=0
+            temperature=0.3
         )
         
         sql = response.choices[0].message.content.strip()

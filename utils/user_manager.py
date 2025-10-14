@@ -8,6 +8,7 @@ class UserRole(Enum):
     CUSTOMER_SERVICE = "customer_service"
     CALL_CENTER = "call_center"
     UNIT_MANAGER = "unit_manager"
+    DEV_ADMIN = "dev_admin"
 
 class User:
     def __init__(self, username: str, role: UserRole, department: str = None):
@@ -22,6 +23,7 @@ USERS = {
     "peter": User("peter", UserRole.LOGISTICS),
     "linda": User("linda", UserRole.CUSTOMER_SERVICE),
     "pontus": User("pontus", UserRole.CALL_CENTER),
+    "amila": User("amila.g", UserRole.DEV_ADMIN),
 }
 
 def get_user(username: str) -> Optional[User]:

@@ -53,6 +53,12 @@ SYSTEM_CONFIGS = {
         'type': 'MSSQL',
         'dsn': 'ASTRO_DSN',  # You'll provide
         'password': 'PASSWORD'  # You'll provide
+    },
+    'FSIAH': {
+        'type': 'MSSQL',
+        'server': 'FSDHWFP01\\SQLEXPRESS',
+        'database': 'query_learning_db', 
+        'trusted_connection': True
     }
 }
 
@@ -62,7 +68,13 @@ def get_db_connection(system_id: str):
     if not config:
         raise ValueError(f"Unknown system: {system_id}")
     
-    return pyodbc.connect(f"DSN={config['dsn']};PWD={config['password']}")
+    if config.get('type') == 'MSSQL' and config.get('trusted_connection'):
+        # Windows Auth for FSIAH
+        conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={config['server']};DATABASE={config['database']};Trusted_Connection=yes"
+        return pyodbc.connect(conn_str)
+    else:
+        # DSN connection for other systems
+        return pyodbc.connect(f"DSN={config['dsn']};PWD={config['password']}")
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -245,6 +257,8 @@ async def search_customers(
     )
 
 
+
+
 @app.post("/api/{system_id}/execute-query")
 async def execute_query_multi(system_id: str, request: dict):
     """Execute query on any system"""
@@ -262,6 +276,35 @@ async def execute_query_multi(system_id: str, request: dict):
         }
     except Exception as e:
         raise HTTPException(500, str(e))
+    
+
+
+@app.post("/api/execute-query-fsiah")
+async def execute_query_fsiah(query_request: dict, request: Request):
+    """Execute query specifically on FSIAH system"""
+    print({f'XXXX, query_request'} )
+    try:
+        username = request.headers.get("X-Username")
+        if not username:
+            raise HTTPException(status_code=401, detail="Username required")
+        
+        conn = get_db_connection("FSIAH")
+        cursor = conn.cursor()
+        cursor.execute(query_request['query'])
+        results = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        
+        return {
+            "success": True,
+            "data": [dict(zip(columns, row)) for row in results],
+            "system_id": "FSIAH"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
 
 @app.post("/api/execute-query")
 async def execute_query(query_request: DynamicQueryRequest, request: Request, system_id: str = "STYR"):

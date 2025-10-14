@@ -178,12 +178,11 @@ if prompt := st.chat_input("Ask about system performance..."):
                 else:
                     # Execute query against MSSQL analytics database
                     # Note: Using STYR as system_id but targeting analytics DB
-                    result = asyncio.run(query_executor.execute_query(
+                    result = asyncio.run(query_executor.execute_query_FSIAH(
                         sql_query, 
                         st.session_state.username, 
-                        "STYR"  # Gateway will route to correct DB
+                        "FSIAH"  # Gateway will route to correct DB
                     ))
-
                     
                     if result.get("success"):
                         rows = result["data"]["rows"]

@@ -141,6 +141,15 @@ TABLE_PERMISSIONS = {
         "description": "Basic customer lookup and order status inquiry"
     },
     
+    UserRole.DEV_ADMIN: [
+        "query_history",
+        "performance_metrics", 
+        "cache_statistics",
+        "query_patterns",
+        "conversation_sessions",
+        "rbac_rules_dynamic"
+    ],
+
     UserRole.UNIT_MANAGER: {
         "tables": [
             # Customer data for their department

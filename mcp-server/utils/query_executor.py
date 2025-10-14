@@ -32,3 +32,34 @@ class QueryExecutor:
     def execute_sync(self, sql: str, username: str, system_id: str = "STYR"):
         """Sync wrapper for execute_query"""
         return asyncio.run(self.execute_query(sql, username, system_id))
+    
+
+    async def execute_query_FSIAH(self, sql: str, username: str, system_id: str = "FSIAH") -> Dict[str, Any]:
+        """Execute SQL query on specified system"""
+        print ('reach here')
+        try:
+            # Use direct endpoint with system_id parameter
+            gateway_url = f"http://10.200.0.2:8080/api/execute-query-fsiah?system_id={system_id}"
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    gateway_url,
+                    json={"query": sql},
+                    headers={
+                        "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                        "X-Username": username
+                    },
+                    timeout=30.0
+                )
+                return response.json()
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+    
+    def execute_sync(self, sql: str, username: str, system_id: str = "STYR"):
+        """Sync wrapper for execute_query"""
+        return asyncio.run(self.execute_query(sql, username, system_id))
+    
+
+    def execute_sync_FSIAH(self, sql: str, username: str, system_id: str = "FSIAH"):
+        """Sync wrapper for FSIAH execute_query"""
+        return asyncio.run(self.execute_query_FSIAH(sql, username, system_id))

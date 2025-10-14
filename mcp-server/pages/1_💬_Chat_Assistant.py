@@ -726,9 +726,10 @@ else:
         st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
                  width=150)
     with col2:
-        st.markdown("<h3>")
-        st.markdown(f"<h3>Hi **{st.session_state.username.upper()}**, I'm your assistant today. I can help you with STYR data.</h3>")
-        st.markdown("</h3>")
+        st.markdown(
+            f"<h3>Hi <b>{st.session_state.username.upper()}</b>, I'm your assistant today. I can help you with STYR data.</h3>",
+            unsafe_allow_html=True
+        )
 
 
 
