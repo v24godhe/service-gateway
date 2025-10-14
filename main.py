@@ -1235,16 +1235,27 @@ async def get_system_schema(system_id: str):
         raise HTTPException(status_code=404, detail="System not found")
     
     try:
-        conn = get_db_connection(system_id)
+        # Use same connection method as StyrDatabaseConnector
+        connection_string = f"""
+        DRIVER={{IBM i Access ODBC Driver}};
+        SYSTEM={os.getenv('STYR_SYSTEM')};
+        USERID={os.getenv('STYR_USERID')};
+        PASSWORD={os.getenv('STYR_PASSWORD')};
+        ALLOWPROCCALLS=1;
+        SORTTABLE=1;
+        """
+        
+        conn = pyodbc.connect(connection_string)
         cursor = conn.cursor()
         
         # Get tables and columns
         cursor.execute("""
             SELECT 
-                TABLE_SCHEMA + '.' + TABLE_NAME AS full_table_name,
+                TABLE_SCHEMA,
+                TABLE_NAME,
                 COLUMN_NAME,
                 DATA_TYPE
-            FROM INFORMATION_SCHEMA.COLUMNS
+            FROM QSYS2.SYSCOLUMNS
             WHERE TABLE_SCHEMA IN ('DCPO', 'EGU')
             ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
         """)
@@ -1252,12 +1263,12 @@ async def get_system_schema(system_id: str):
         # Group by table
         schema = {}
         for row in cursor.fetchall():
-            table_name = row[0]
-            if table_name not in schema:
-                schema[table_name] = []
-            schema[table_name].append({
-                "column_name": row[1],
-                "data_type": row[2]
+            table_key = f"{row[0]}.{row[1]}"
+            if table_key not in schema:
+                schema[table_key] = []
+            schema[table_key].append({
+                "column_name": row[2],
+                "data_type": row[3]
             })
         
         cursor.close()

@@ -214,3 +214,25 @@ class SystemAdmin:
             return True, f"System {system_id} deleted"
         except Exception as e:
             return False, str(e)
+        
+    def is_admin(self, username: str) -> bool:
+        """Check if user is EITHER Dev Admin OR Super Admin"""
+        
+        # First check Dev Admin (Postgres)
+        if self.is_dev_admin(username):
+            return True
+        
+        # Then check Super Admin (via Gateway API)
+        try:
+            import httpx
+            gateway_url = os.getenv('GATEWAY_URL', 'http://10.200.0.2:8080')
+            response = httpx.get(
+                f"{gateway_url}/api/admin/check/{username}",
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                return response.json().get("is_admin", False)
+        except Exception as e:
+            print(f"⚠️ Could not check super admin: {e}")
+        
+        return False
