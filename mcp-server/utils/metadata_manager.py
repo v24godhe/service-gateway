@@ -1,8 +1,19 @@
-import openai
+from openai import OpenAI
 import os
 import json
+from dotenv import load_dotenv
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+load_dotenv()
+
+def get_env_variable(var_name, default=None):
+    """Get env variable safely, with optional default."""
+    return os.getenv(var_name, default)
+
+OPENAI_API_KEY = get_env_variable("OPENAI_API_KEY")
+GATEWAY_URL = get_env_variable("GATEWAY_URL")
+GATEWAY_TOKEN = get_env_variable("GATEWAY_TOKEN")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def generate_friendly_names(column_names: list) -> dict:
     """Generate user-friendly names for database columns using GPT-4"""
@@ -19,6 +30,7 @@ Example format:
 {{"KHKNR": "Customer Number", "KHFKN": "Customer Name", "created_at": "Created Date"}}
 
 Rules:
+- Never add new columns always add Friendly name to the exsistng Columns
 - Keep names short (2-4 words max)
 - Use title case
 - Remove technical prefixes
@@ -27,7 +39,7 @@ Rules:
 """
     
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3
