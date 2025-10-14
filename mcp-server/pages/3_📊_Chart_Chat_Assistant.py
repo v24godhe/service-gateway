@@ -28,24 +28,46 @@ if "session_id" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = "harold"
 
-# Sidebar - User
-st.sidebar.markdown("### 👤 User")
-st.sidebar.success(f"👤 {st.session_state.username}")
+# Sidebar
+with st.sidebar:
+    # Navigation
+    st.markdown("### 🏠 Navigation")
+    if st.button("← Home", use_container_width=True):
+        st.switch_page("Home.py")
+    
+    st.markdown("---")
+    
+    # Logo
+    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
+    st.markdown("---")
+    
+    # Page Navigation
+    st.markdown("### 👤 USER FUNCTIONS")
+    if st.button("💬 Chat Assistant", use_container_width=True):
+        st.switch_page("pages/1_💬_Chat_Assistant.py")
+    if st.button("📊 Chart Assistant", use_container_width=True, disabled=True):
+        pass  # Current page
+    
+    st.markdown("---")
+    
+    # User Info
+    st.markdown("### 👤 User")
+    st.success(f"👤 {st.session_state.username}")
 
-# System selector
-if 'selected_system' not in st.session_state:
-    st.session_state.selected_system = "STYR"
+    # System selector
+    if 'selected_system' not in st.session_state:
+        st.session_state.selected_system = "STYR"
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 🗄️ Database System")
-available_systems = system_manager.get_available_systems()
-selected_system = st.sidebar.selectbox(
-    "Active System",
-    available_systems,
-    index=available_systems.index(st.session_state.selected_system),
-    key="system_selector_chart"
-)
-st.session_state.selected_system = selected_system
+    st.markdown("---")
+    st.markdown("### 🗄️ Database System")
+    available_systems = system_manager.get_available_systems()
+    selected_system = st.selectbox(
+        "Active System",
+        available_systems,
+        index=available_systems.index(st.session_state.selected_system),
+        key="system_selector_chart"
+    )
+    st.session_state.selected_system = selected_system
 
 # Display chat history
 for message in st.session_state.messages:

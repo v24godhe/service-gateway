@@ -206,14 +206,23 @@ def get_rbac_rules():
 
 # Sidebar
 with st.sidebar:
-    # Home button
-    if st.button("🏠 Back to Home", use_container_width=True):
+    # Navigation
+    st.markdown("### 🏠 Navigation")
+    if st.button("← Home", use_container_width=True):
         st.switch_page("Home.py")
     
     st.markdown("---")
     
+    # Logo
     st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg",
              use_container_width=True)
+    st.markdown("---")
+    
+    # Page Navigation Section
+    st.markdown("### 🔐 SUPER ADMIN")
+    if st.button("🔐 Admin Dashboard", use_container_width=True, disabled=True):
+        pass  # Current page
+    
     st.markdown("---")
     
     if not st.session_state.authenticated:
@@ -230,7 +239,7 @@ with st.sidebar:
                 else:
                     st.error("Not authorized as super admin")
     else:
-        st.markdown(f"### Logged in as")
+        st.markdown(f"### 👤 Logged in as")
         st.markdown(f"**{st.session_state.admin_username.upper()}**")
         st.markdown("🔐 Super Admin")
         
@@ -240,7 +249,7 @@ with st.sidebar:
             st.rerun()
         
         st.markdown("---")
-        st.markdown("### Navigation")
+        st.markdown("### Dashboard Pages")
         page = st.radio(
             "Select Page",
             ["📋 Pending Requests", "📊 Dashboard", "🔑 RBAC Management", "📜 Request History"],

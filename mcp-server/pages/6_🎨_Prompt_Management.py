@@ -221,7 +221,36 @@ def generate_diff_html(old_text, new_text):
     html += '</div>'
     return html
 
-# ==================== UI ====================
+# Sidebar
+with st.sidebar:
+    # Navigation
+    st.markdown("### 🏠 Navigation")
+    if st.button("← Home", use_container_width=True):
+        st.switch_page("Home.py")
+    
+    st.markdown("---")
+    
+    # Logo
+    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
+    st.markdown("---")
+    
+    # Page Navigation
+    st.markdown("### 🛠️ DEV ADMIN")
+    if st.button("🎨 Prompt Management", use_container_width=True, disabled=True):
+        pass  # Current page
+    if st.button("🗄️ System Management", use_container_width=True):
+        st.switch_page("pages/5_🗄_System_Management.py")
+    if st.button("📈 Analytics", use_container_width=True):
+        st.switch_page("pages/6_📈_Analytics_Chat_Assistant.py")
+    
+    st.markdown("---")
+    
+    # User Info
+    st.markdown("### 👤 Dev Admin")
+    st.success(f"👤 {st.session_state.username}")
+    
+    # Keep existing prompt selector below this...
+
 
 # Tab selection
 tab1, tab2, tab3 = st.tabs(["📝 Editor", "📊 Version History", "📈 Analytics"])

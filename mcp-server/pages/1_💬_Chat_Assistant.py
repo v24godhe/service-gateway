@@ -492,7 +492,24 @@ async def export_to_excel(sql_query: str, username: str):
 
 # Sidebar
 with st.sidebar:
-    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg",use_container_width=True)
+    # Navigation
+    st.markdown("### 🏠 Navigation")
+    if st.button("← Home", use_container_width=True):
+        st.switch_page("Home.py")
+    
+    st.markdown("---")
+    
+    # Logo
+    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
+    st.markdown("---")
+    
+    # Page Navigation
+    st.markdown("### 👤 USER FUNCTIONS")
+    if st.button("💬 Chat Assistant", use_container_width=True, disabled=True):
+        pass  # Current page
+    if st.button("📊 Chart Assistant", use_container_width=True):
+        st.switch_page("pages/3_📊_Chart_Chat_Assistant.py")
+    
     st.markdown("---")
 
     if st.session_state.username is None:
@@ -517,7 +534,7 @@ with st.sidebar:
                 initialize_chat_session()
                 st.rerun()
     else:
-        st.markdown(f"### Logged in as")
+        st.markdown(f"### 👤 Logged in as")
         st.markdown(f"**{st.session_state.username.upper()}**")
         
         # Show current date context
@@ -529,7 +546,6 @@ with st.sidebar:
             st.session_state.username = None
             st.session_state.messages = []
 
-        # ADD THIS NEW SECTION:
         st.markdown("---")
         st.markdown("### 🧠 Memory Controls")
 

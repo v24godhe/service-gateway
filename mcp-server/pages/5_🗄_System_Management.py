@@ -12,28 +12,55 @@ system_admin = SystemAdmin()
 if "username" not in st.session_state:
     st.session_state.username = None
 
-# Simple login form
-if not st.session_state.username:
-    st.title("🔐 Login Required")
+# Sidebar
+with st.sidebar:
+    # Navigation
+    st.markdown("### 🏠 Navigation")
+    if st.button("← Home", use_container_width=True):
+        st.switch_page("Home.py")
+    
     st.markdown("---")
     
-    username_input = st.text_input("Enter your username:", placeholder="amila.g")
+    # Logo
+    st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo_white.svg", use_container_width=True)
+    st.markdown("---")
     
-    if st.button("Login", type="primary"):
-        if username_input:
-            # Check if dev admin
-            if system_admin.is_dev_admin(username_input):
-                st.session_state.username = username_input
-                st.success(f"✅ Logged in as {username_input}")
-                st.rerun()
+    # Page Navigation
+    st.markdown("### 🛠️ DEV ADMIN")
+    if st.button("🎨 Prompt Management", use_container_width=True):
+        st.switch_page("pages/4_🎨_Prompt_Management.py")
+    if st.button("🗄️ System Management", use_container_width=True, disabled=True):
+        pass  # Current page
+    if st.button("📈 Analytics", use_container_width=True):
+        st.switch_page("pages/6_📈_Analytics_Chat_Assistant.py")
+    
+    st.markdown("---")
+    
+    # Login/User section
+    if not st.session_state.username:
+        st.markdown("### 🔐 Dev Admin Login")
+        username_input = st.text_input("Username:", placeholder="amila.g")
+        
+        if st.button("Login", use_container_width=True, type="primary"):
+            if username_input:
+                if system_admin.is_dev_admin(username_input):
+                    st.session_state.username = username_input
+                    st.success(f"✅ Logged in")
+                    st.rerun()
+                else:
+                    st.error("⛔ Access denied")
             else:
-                st.error("⛔ You are not a Dev Admin. Access denied.")
-        else:
-            st.error("Please enter a username")
-    
-    st.info("💡 Dev Admin users: amila.g")
-    st.stop()
-
+                st.error("Enter username")
+        
+        st.info("💡 Dev Admin: amila.g")
+        st.stop()
+    else:
+        st.markdown("### 👤 Dev Admin")
+        st.success(f"👤 {st.session_state.username}")
+        
+        if st.button("Logout", use_container_width=True):
+            st.session_state.username = None
+            st.rerun()
 
 st.title("🗄 Database System Management")
 st.markdown("---")
