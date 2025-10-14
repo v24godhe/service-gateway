@@ -39,6 +39,10 @@ from services.permission_management_service import PermissionManagementService
 from typing import List
 from fastapi import Body, Header
 import pyodbc
+from pydantic import BaseModel
+from typing import List
+
+
 SYSTEM_CONFIGS = {
     'STYR': {
         'dsn': 'STYR_CONNECTION',
@@ -68,13 +72,14 @@ def get_db_connection(system_id: str):
     if not config:
         raise ValueError(f"Unknown system: {system_id}")
     
+    # Handle MSSQL with Windows Auth
     if config.get('type') == 'MSSQL' and config.get('trusted_connection'):
-        # Windows Auth for FSIAH
         conn_str = f"DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={config['server']};DATABASE={config['database']};Trusted_Connection=yes"
         return pyodbc.connect(conn_str)
     else:
-        # DSN connection for other systems
+        # Handle DSN connections for other systems
         return pyodbc.connect(f"DSN={config['dsn']};PWD={config['password']}")
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -282,7 +287,6 @@ async def execute_query_multi(system_id: str, request: dict):
 @app.post("/api/execute-query-fsiah")
 async def execute_query_fsiah(query_request: dict, request: Request):
     """Execute query specifically on FSIAH system"""
-    print({f'XXXX, query_request'} )
     try:
         username = request.headers.get("X-Username")
         if not username:
@@ -795,6 +799,19 @@ async def clear_conversation_session(session_id: str):
         logger.error(f"Clear session failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+class ColumnMetadata(BaseModel):
+    column_name: str
+    friendly_name: str
+    is_visible: bool
+
+class MetadataSaveRequest(BaseModel):
+    system_id: str
+    table_name: str
+    columns: List[ColumnMetadata]
+    created_by: str
+
+   
 # ========== END DATABASE CONVERSATION MEMORY ENDPOINTS ==========
 
 @app.get("/api/system/test-connection")
@@ -1210,6 +1227,103 @@ async def get_permission_stats(admin_username: str = Header(..., alias="X-Admin-
     
     return stats
 
+@app.get("/api/{system_id}/schema")
+async def get_system_schema(system_id: str):
+    """Get database schema for a system"""
+    
+    if system_id != "STYR":
+        raise HTTPException(status_code=404, detail="System not found")
+    
+    try:
+        conn = get_db_connection(system_id)
+        cursor = conn.cursor()
+        
+        # Get tables and columns
+        cursor.execute("""
+            SELECT 
+                TABLE_SCHEMA + '.' + TABLE_NAME AS full_table_name,
+                COLUMN_NAME,
+                DATA_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA IN ('DCPO', 'EGU')
+            ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
+        """)
+        
+        # Group by table
+        schema = {}
+        for row in cursor.fetchall():
+            table_name = row[0]
+            if table_name not in schema:
+                schema[table_name] = []
+            schema[table_name].append({
+                "column_name": row[1],
+                "data_type": row[2]
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "system_id": system_id,
+            "tables": schema
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/metadata/save")
+async def save_metadata(request: MetadataSaveRequest):
+    """Save table metadata configuration"""
+    
+    try:
+
+        conn = get_db_connection("FSIAH")
+        cursor = conn.cursor()
+        
+        saved_count = 0
+        for col in request.columns:
+            # Check if exists
+            cursor.execute("""
+                SELECT id FROM table_metadata_config
+                WHERE system_id = ? AND table_name = ? AND column_name = ?
+            """, (request.system_id, request.table_name, col.column_name))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Update
+                cursor.execute("""
+                    UPDATE table_metadata_config
+                    SET friendly_name = ?, is_visible = ?, modified_by = ?, modified_at = GETDATE()
+                    WHERE id = ?
+                """, (col.friendly_name, col.is_visible, request.created_by, existing[0]))
+            else:
+                # Insert
+                cursor.execute("""
+                    INSERT INTO table_metadata_config
+                    (system_id, table_name, column_name, friendly_name, is_visible, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (request.system_id, request.table_name, col.column_name, 
+                      col.friendly_name, col.is_visible, request.created_by))
+            
+            saved_count += 1
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "saved_count": saved_count,
+            "message": f"Saved {saved_count} columns for {request.table_name}"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)

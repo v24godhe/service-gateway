@@ -607,7 +607,7 @@ if st.session_state.username is None:
         st.image("https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
                  width=150)
     with col2:
-        st.markdown("<h3 style='text-align: center;'>AI Assistant</h3>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'>AI Assistant</h2>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #666;'>Select your account to get started</p>",
                    unsafe_allow_html=True)
 else:
@@ -620,6 +620,15 @@ else:
             f"<h3>Hi <b>{st.session_state.username.upper()}</b>, I'm your assistant today. I can help you with STYR data.</h3>",
             unsafe_allow_html=True
         )
+
+
+
+    # Display chat history
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f"<div class='user-message'>{msg['content']}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='assistant-message'>{msg['content']}</div>", unsafe_allow_html=True)
 
     # ==== Display previous chat messages ====
     for msg in st.session_state.messages:

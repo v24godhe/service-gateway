@@ -95,14 +95,6 @@ for message in st.session_state.analytics_messages:
         if "data" in message:
             st.dataframe(message["data"], use_container_width=True)
 
-# Example queries
-with st.expander("💡 Example Questions"):
-```)  
-with this updated version:
-
----
-
-```python
 # Input form (same look as main Chat Assistant)
 with st.form(key="analytics_chat_form", clear_on_submit=True):
     user_input = st.text_input(
