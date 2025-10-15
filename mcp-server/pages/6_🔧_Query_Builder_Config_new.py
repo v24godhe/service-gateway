@@ -2,14 +2,15 @@ import streamlit as st
 import httpx
 import os
 from dotenv import load_dotenv
-from openai import OpenAI
 from utils.system_admin import SystemAdmin
 from utils.theme import THEMES
 from utils.metadata_manager import generate_friendly_names
 
 load_dotenv()
 
-# Auth check
+# -------------------------
+# Auth and page config
+# -------------------------
 system_admin = SystemAdmin()
 if "username" not in st.session_state or not st.session_state.username:
     st.error("🔐 Please login first")
@@ -27,7 +28,9 @@ st.set_page_config(
 
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://10.200.0.2:8080")
 
-# Initialize session state
+# -------------------------
+# Session state defaults
+# -------------------------
 if "configured_tables" not in st.session_state:
     st.session_state.configured_tables = []
 if "search_results" not in st.session_state:
@@ -39,8 +42,9 @@ if "editing_table" not in st.session_state:
 if "column_config" not in st.session_state:
     st.session_state.column_config = {}
 
-
-
+# -------------------------
+# Helper functions
+# -------------------------
 def load_configured_tables(system_id):
     """Load only configured tables - fast!"""
     try:
@@ -58,8 +62,9 @@ def load_configured_tables(system_id):
             return False
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error loading configured tables: {e}")
         return False
+
 
 def search_unconfigured_tables(system_id, search_term):
     """Search for tables by name"""
@@ -79,25 +84,40 @@ def search_unconfigured_tables(system_id, search_term):
             return False
 
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Error searching unconfigured tables: {e}")
         return False
 
+
 def load_table_columns(system_id, table_name):
-    """Load columns for a specific table"""
+    """Load columns for a specific table (returns list of dicts with column_name & data_type)"""
     try:
         response = httpx.get(
             f"{GATEWAY_URL}/api/{system_id}/schema",
             timeout=30.0
         )
-
         if response.status_code == 200:
             all_tables = response.json().get('tables', {})
-            return all_tables.get(table_name, [])
-        return []
-
+            columns = all_tables.get(table_name, [])
+            formatted = []
+            for col in columns:
+                if isinstance(col, dict):
+                    formatted.append({
+                        "column_name": col.get("column_name", ""),
+                        "data_type": col.get("data_type", "VARCHAR"),
+                        # preserve any existing friendly_name flags if source sends it
+                        "friendly_name": col.get("friendly_name")
+                    })
+                else:
+                    # legacy: simple list of names
+                    formatted.append({"column_name": str(col), "data_type": "VARCHAR"})
+            return formatted
+        else:
+            st.error(f"Failed to load schema: {response.text}")
+            return []
     except Exception as e:
         st.error(f"Error loading columns: {e}")
         return []
+
 
 def load_table_metadata(system_id, table_name):
     """Load existing metadata for editing"""
@@ -119,6 +139,7 @@ def load_table_metadata(system_id, table_name):
         st.error(f"Error: {e}")
         return None
 
+
 def invalidate_cache(system_id, user_role=None):
     """Invalidate schema cache"""
     try:
@@ -130,11 +151,13 @@ def invalidate_cache(system_id, user_role=None):
 
         if response.status_code == 200:
             st.success("✅ Cache invalidated")
-
     except Exception as e:
         st.warning(f"⚠️ Cache error: {e}")
 
+
+# -------------------------
 # Sidebar
+# -------------------------
 with st.sidebar:
     st.markdown("### 🛠️ DEV ADMIN")
     if st.button("🔧 Query Builder", use_container_width=True, disabled=True):
@@ -150,12 +173,15 @@ with st.sidebar:
         st.session_state.username = None
         st.rerun()
 
+
+# -------------------------
 # Main content
+# -------------------------
 st.title("🔧 Query Builder Configuration")
 st.markdown("Configure table metadata for AI-powered queries")
 st.markdown("---")
 
-# System Selection
+# System Selection (fixed to STYR for now)
 system_id = st.selectbox("System", ["STYR"], disabled=True)
 
 # Control buttons
@@ -174,23 +200,21 @@ st.markdown("---")
 
 # ========== CONFIGURED TABLES ==========
 st.markdown("## 📋 Configured Tables")
-
 if st.session_state.configured_tables:
     for table in st.session_state.configured_tables:
         with st.expander(f"✅ {table['table_name']} ({table.get('table_friendly_name', 'No name')})", expanded=False):
             col1, col2, col3 = st.columns(3)
-
             with col1:
-                st.metric("Total Columns", table['column_count'])
+                st.metric("Total Columns", table.get('column_count', 0))
             with col2:
-                st.metric("Visible", table['visible_columns'])
+                st.metric("Visible", table.get('visible_columns', 0))
             with col3:
-                st.metric("PII", table['pii_columns'])
+                st.metric("PII", table.get('pii_columns', 0))
 
             st.markdown(f"**Description:** {table.get('table_description', 'N/A')}")
             st.markdown(f"**GDPR:** {table.get('gdpr_category', 'N/A')}")
             st.markdown(f"**Sensitivity:** {table.get('data_sensitivity', 'INTERNAL')}")
-            st.markdown(f"**Contains PII:** {'Yes' if table['contains_pii'] else 'No'}")
+            st.markdown(f"**Contains PII:** {'Yes' if table.get('contains_pii') else 'No'}")
 
             if st.button(f"✏️ Edit", key=f"edit_{table['table_name']}"):
                 st.session_state.editing_table = table['table_name']
@@ -224,15 +248,14 @@ if search_button and search_term:
 if st.session_state.search_results:
     st.markdown("### Search Results")
     for result in st.session_state.search_results:
-        with st.expander(f"⏳ {result['table_name']} ({result['column_count']} columns)"):
-            st.markdown(f"**Schema:** {result['schema']}")
-            st.markdown(f"**Columns:** {result['column_count']}")
+        with st.expander(f"⏳ {result['table_name']} ({result.get('column_count', 0)} columns)"):
+            st.markdown(f"**Schema:** {result.get('schema', '')}")
+            st.markdown(f"**Columns:** {result.get('column_count', 0)}")
 
             if st.button(f"⚙️ Configure", key=f"config_{result['table_name']}"):
                 st.session_state.selected_table = result['table_name']
                 st.session_state.editing_table = None
                 st.rerun()
-
 elif search_term and search_button:
     st.info("No matching tables found. Try a different search term.")
 
@@ -250,8 +273,9 @@ if st.session_state.selected_table or st.session_state.editing_table:
     if st.session_state.editing_table:
         existing_metadata = load_table_metadata(system_id, table_to_config)
         if existing_metadata:
-            columns = existing_metadata['columns']
-            table_info = existing_metadata['table_info']
+            # Expect existing_metadata to provide 'columns' as list of dicts
+            columns = existing_metadata.get('columns', [])
+            table_info = existing_metadata.get('table_info', {})
         else:
             st.error("Failed to load metadata")
             st.stop()
@@ -264,6 +288,25 @@ if st.session_state.selected_table or st.session_state.editing_table:
                 st.stop()
         table_info = {}
 
+    # If columns were provided as objects, normalize them to dicts
+    normalized_columns = []
+    for c in columns:
+        if isinstance(c, dict):
+            normalized_columns.append({
+                "column_name": c.get("column_name"),
+                "data_type": c.get("data_type", "VARCHAR"),
+                "friendly_name": c.get("friendly_name")  # may be None
+            })
+        else:
+            # support object-like or plain string
+            try:
+                col_name = getattr(c, "column_name", str(c))
+            except Exception:
+                col_name = str(c)
+            normalized_columns.append({"column_name": col_name, "data_type": getattr(c, "data_type", "VARCHAR")})
+
+    columns = normalized_columns
+
     # Table metadata form
     st.markdown("### Table Information")
     col1, col2 = st.columns(2)
@@ -271,155 +314,160 @@ if st.session_state.selected_table or st.session_state.editing_table:
     with col1:
         table_friendly_name = st.text_input(
             "Friendly Name *",
-            value=table_info.get('table_friendly_name', ''),
+            value=table_info.get('table_friendly_name', '') if table_info else '',
             placeholder="e.g., Customers, Orders"
         )
 
         contains_pii = st.checkbox(
             "Contains PII",
-            value=table_info.get('contains_pii', False)
+            value=table_info.get('contains_pii', False) if table_info else False
         )
 
+        gdpr_options = ['None', 'Personal', 'Financial', 'Health', 'Operational']
         gdpr_category = st.selectbox(
             "GDPR Category",
-            ['None', 'Personal', 'Financial', 'Health', 'Operational'],
-            index=['None', 'Personal', 'Financial', 'Health', 'Operational'].index(
-                table_info.get('gdpr_category', 'None')
-            ) if table_info.get('gdpr_category') in ['None', 'Personal', 'Financial', 'Health', 'Operational'] else 0
+            gdpr_options,
+            index=gdpr_options.index(table_info.get('gdpr_category', 'None')) if table_info and table_info.get('gdpr_category') in gdpr_options else 0
         )
 
     with col2:
         table_description = st.text_area(
             "Description",
-            value=table_info.get('table_description', ''),
+            value=table_info.get('table_description', '') if table_info else '',
             placeholder="What this table contains..."
         )
 
+        sensitivity_options = ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SENSITIVE']
         data_sensitivity = st.selectbox(
             "Data Sensitivity",
-            ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SENSITIVE'],
-            index=['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SENSITIVE'].index(
-                table_info.get('data_sensitivity', 'INTERNAL')
-            ) if table_info.get('data_sensitivity') in ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'SENSITIVE'] else 1
+            sensitivity_options,
+            index=sensitivity_options.index(table_info.get('data_sensitivity', 'INTERNAL')) if table_info and table_info.get('data_sensitivity') in sensitivity_options else 1
         )
 
     st.markdown("---")
 
-    # ========== COLUMN CONFIGURATION (FIXED & SIMPLIFIED) ==========
+    # ========== COLUMN CONFIGURATION ==========
     st.markdown("### Column Configuration")
 
-    # AI Generate Button - SIMPLIFIED & FIXED
+    # Generate friendly names: show input/output for debugging, apply and rerun to refresh UI
     if st.button("🤖 Generate Friendly Names", type="primary"):
         with st.spinner("AI generating friendly names..."):
             try:
-                # Get column names
-                column_names = []
-                for col in columns:
-                    if isinstance(col, dict):
-                        column_names.append(col["column_name"])
-                    else:
-                        column_names.append(col.column_name)
+                column_names = [col["column_name"] for col in columns if col.get("column_name")]
 
-                if column_names:
-                    # Generate friendly names using AI
+                # Show what will be sent to AI
+                # st.subheader("🧩 Input to generate_friendly_names()")
+                # st.json(column_names)
+
+                if not column_names:
+                    st.warning("No columns found")
+                else:
                     friendly_names = generate_friendly_names(column_names)
-                    print(friendly_names)
-                    # Apply to all columns immediately
+
+                    # Accept both dict output or list output (defensive)
+                    if friendly_names is None:
+                        friendly_names = {}
+                    if isinstance(friendly_names, list):
+                        # convert list to dict by index if lengths match
+                        if len(friendly_names) == len(column_names):
+                            friendly_names = {column_names[i]: friendly_names[i] for i in range(len(column_names))}
+                        else:
+                            # fallback: map using values (not ideal)
+                            friendly_names = {column_names[i]: friendly_names[i] if i < len(friendly_names) else column_names[i] for i in range(len(column_names))}
+                    elif not isinstance(friendly_names, dict):
+                        # fallback: string or other -> no-op
+                        friendly_names = {}
+
+                    # Display AI output for debugging
+                    # st.subheader("🎯 Output from generate_friendly_names()")
+                    # st.json(friendly_names)
+
+                    # Apply friendly names to session state
                     for col in columns:
-
-
                         col_name = col["column_name"]
+                        data_type = col.get("data_type", "VARCHAR")
+                        # If the source already included a friendly name (when editing), prefer that unless AI produced one
+                        existing_friendly = col.get("friendly_name")
+                        applied = friendly_names.get(col_name, existing_friendly if existing_friendly else col_name)
                         st.session_state.column_config[col_name] = {
-                            "friendly_name": friendly_names.get(col_name, col_name),
-                            "is_visible": True,
-                            "data_type": col["data_type"],
-                            "contains_pii": col.get("contains_pii", False) if isinstance(col, dict) else False,
-                            "data_classification": col.get("data_classification", "INTERNAL") if isinstance(col, dict) else "INTERNAL"
+                            "friendly_name": applied,
+                            "type": data_type,
+                            "is_visible": True if st.session_state.column_config.get(col_name, {}).get("is_visible", True) else False,
+                            "contains_pii": st.session_state.column_config.get(col_name, {}).get("contains_pii", False),
+                            "data_classification": st.session_state.column_config.get(col_name, {}).get("data_classification", "INTERNAL")
                         }
-                        
-                        st.success(f"Generated {len(friendly_names)} friendly names!")
-                        st.rerun()
-
-                        # col_name = col["column_name"] if isinstance(col, dict) else col.column_name
-
-                        # # Initialize if not exists
-                        # if col_name not in st.session_state.column_config:
-                        #     st.session_state.column_config[col_name] = {
-                        #         "friendly_name": col_name,
-                        #         "is_visible": col.get("is_visible", True) if isinstance(col, dict) else True,
-                        #         "contains_pii": col.get("contains_pii", False) if isinstance(col, dict) else False,
-                        #         "data_classification": col.get("data_classification", "INTERNAL") if isinstance(col, dict) else "INTERNAL"
-                        #     }
-
-                        # # Apply friendly name
-                        # st.session_state.column_config[col_name]["friendly_name"] = friendly_names.get(col_name, col_name)
 
                     st.success(f"✅ Generated friendly names for {len(friendly_names)} columns!")
-                    st.rerun()  # Refresh to show new names
-                else:
-                    st.warning("No columns found")
+                    # rerun to make the new friendly names appear in the text_inputs
+                    st.rerun()
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"Error generating friendly names: {e}")
 
-    # Display columns with configuration - SIMPLIFIED & FIXED
+    # Header for column list
     st.markdown("#### Configure Each Column")
-
-    # Header row
-    col_header1, col_header2, col_header3, col_header4 = st.columns([3, 3, 1, 1])
+    col_header1, col_header2, col_header3, col_header4, col_header5 = st.columns([3, 3, 2, 1, 1])
     with col_header1:
-        st.write("**Original Name (Type)**")
+        st.write("**Original Name**")
     with col_header2:
         st.write("**Friendly Name**")
     with col_header3:
-        st.write("**Visible**")
+        st.write("**Type**")
     with col_header4:
+        st.write("**Visible**")
+    with col_header5:
         st.write("**PII**")
-
     st.divider()
 
-    # Column rows
+    # Render each column row using values from session_state.column_config where present
     for idx, col in enumerate(columns):
-        col_name = col["column_name"] if isinstance(col, dict) else col.column_name
-        data_type = col.get("data_type", "VARCHAR") if isinstance(col, dict) else getattr(col, "data_type", "VARCHAR")
+        col_name = col["column_name"]
+        data_type = col.get("data_type", "VARCHAR")
 
-        # Ensure config exists
-        if col_name not in st.session_state.column_config:
-            st.session_state.column_config[col_name] = {
-                "friendly_name": col.get("friendly_name", col_name) if isinstance(col, dict) else col_name,
-                "is_visible": col.get("is_visible", True) if isinstance(col, dict) else True,
-                "contains_pii": col.get("contains_pii", False) if isinstance(col, dict) else False,
-                "data_classification": col.get("data_classification", "INTERNAL") if isinstance(col, dict) else "INTERNAL"
+        # Initialize config for this column if missing
+        cfg = st.session_state.column_config.get(col_name, None)
+        if not cfg:
+            cfg = {
+                "friendly_name": col.get("friendly_name", col_name) or col_name,
+                "type": data_type,
+                "is_visible": True,
+                "contains_pii": False,
+                "data_classification": "INTERNAL"
             }
+            st.session_state.column_config[col_name] = cfg
 
-        # Create row
-        col1, col2, col3, col4 = st.columns([3, 3, 1, 1])
+        # Row columns
+        r1, r2, r3, r4, r5 = st.columns([3, 3, 2, 1, 1])
 
-        with col1:
-            st.text(f"{col_name} ({data_type})")
+        with r1:
+            st.text(col_name)
 
-        with col2:
+        with r2:
             new_friendly = st.text_input(
                 "friendly_name",
                 value=st.session_state.column_config[col_name]["friendly_name"],
                 key=f"friendly_{idx}_{col_name}",
                 label_visibility="collapsed"
             )
-            # Update session state
             st.session_state.column_config[col_name]["friendly_name"] = new_friendly
 
-        with col3:
+        with r3:
+            st.text(data_type)
+            # keep type stored as well
+            st.session_state.column_config[col_name]["type"] = data_type
+
+        with r4:
             new_visible = st.checkbox(
                 "visible",
-                value=st.session_state.column_config[col_name]["is_visible"],
+                value=st.session_state.column_config[col_name].get("is_visible", True),
                 key=f"visible_{idx}_{col_name}",
                 label_visibility="collapsed"
             )
             st.session_state.column_config[col_name]["is_visible"] = new_visible
 
-        with col4:
+        with r5:
             new_pii = st.checkbox(
                 "pii",
-                value=st.session_state.column_config[col_name]["contains_pii"],
+                value=st.session_state.column_config[col_name].get("contains_pii", False),
                 key=f"pii_{idx}_{col_name}",
                 label_visibility="collapsed"
             )
@@ -429,27 +477,27 @@ if st.session_state.selected_table or st.session_state.editing_table:
 
     # Save/Cancel buttons
     col1, col2 = st.columns([1, 4])
-
     with col1:
         if st.button("💾 Save Configuration", type="primary"):
             if not table_friendly_name:
                 st.error("❌ Please provide a friendly name for the table")
             else:
                 with st.spinner("Saving configuration..."):
-                    # Build columns payload
+                    # Build columns payload: use column_config but keep original data_type from columns list
                     columns_payload = []
                     for col_name, config in st.session_state.column_config.items():
-                        orig_col = next((c for c in columns if (c['column_name'] if isinstance(c, dict) else c.column_name) == col_name), None)
+                        # find original column definition to get authoritative data_type if available
+                        orig_col = next((c for c in columns if c.get('column_name') == col_name), None)
+                        data_type_value = config.get('type') or (orig_col.get('data_type') if orig_col else 'VARCHAR')
                         columns_payload.append({
                             'column_name': col_name,
-                            'friendly_name': config['friendly_name'],
-                            'is_visible': config['is_visible'],
-                            'data_type': orig_col.get('data_type', 'VARCHAR') if isinstance(orig_col, dict) else 'VARCHAR',
+                            'friendly_name': config.get('friendly_name', col_name),
+                            'is_visible': config.get('is_visible', True),
+                            'data_type': data_type_value,
                             'contains_pii': config.get('contains_pii', False),
                             'data_classification': config.get('data_classification', 'INTERNAL')
                         })
 
-                    # Build full payload
                     payload = {
                         'system_id': system_id,
                         'table_name': table_to_config,
@@ -472,10 +520,10 @@ if st.session_state.selected_table or st.session_state.editing_table:
 
                         if response.status_code == 200:
                             result = response.json()
-                            st.success(f"✅ {result['message']}")
+                            st.success(f"✅ {result.get('message', 'Saved')}")
                             invalidate_cache(system_id)
 
-                            # Clear session state
+                            # Clear only the selection-related state (preserve user in session)
                             st.session_state.selected_table = None
                             st.session_state.editing_table = None
                             st.session_state.column_config = {}
