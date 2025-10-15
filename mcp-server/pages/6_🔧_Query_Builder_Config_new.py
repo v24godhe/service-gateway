@@ -41,6 +41,8 @@ if "editing_table" not in st.session_state:
     st.session_state.editing_table = None
 if "column_config" not in st.session_state:
     st.session_state.column_config = {}
+if "widget_version" not in st.session_state:
+    st.session_state.widget_version = 0
 
 # -------------------------
 # Helper functions
@@ -398,7 +400,7 @@ if st.session_state.selected_table or st.session_state.editing_table:
                         }
 
                     st.success(f"✅ Generated friendly names for {len(friendly_names)} columns!")
-                    # rerun to make the new friendly names appear in the text_inputs
+                    st.session_state.widget_version += 1
                     st.rerun()
             except Exception as e:
                 st.error(f"Error generating friendly names: {e}")
@@ -445,10 +447,9 @@ if st.session_state.selected_table or st.session_state.editing_table:
             new_friendly = st.text_input(
                 "friendly_name",
                 value=st.session_state.column_config[col_name]["friendly_name"],
-                key=f"friendly_{idx}_{col_name}",
+                key=f"friendly_{st.session_state.widget_version}_{idx}_{col_name}",  # Include version
                 label_visibility="collapsed"
             )
-            st.session_state.column_config[col_name]["friendly_name"] = new_friendly
 
         with r3:
             st.text(data_type)
