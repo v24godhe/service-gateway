@@ -623,13 +623,6 @@ else:
 
 
 
-    # Display chat history
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(f"<div class='user-message'>{msg['content']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='assistant-message'>{msg['content']}</div>", unsafe_allow_html=True)
-
     # ==== Display previous chat messages ====
     for msg in st.session_state.messages:
         if msg["role"] == "user":

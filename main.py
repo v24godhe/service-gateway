@@ -1336,5 +1336,98 @@ async def save_metadata(request: MetadataSaveRequest):
             "error": str(e)
         }
 
+@app.get("/api/{system_id}/schema-with-rbac")
+async def get_schema_with_rbac(
+    system_id: str,
+    user_role: str,
+    authorization: str = Header(None)
+):
+    """
+    Get schema with RBAC filtering and friendly names
+    Returns only tables/columns user can access with metadata
+    """
+    # Auth check
+    if not verify_auth_token(authorization):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    try:
+        # Get RBAC rules for user role
+        rbac_rules = permission_service.get_rbac_rules_for_role(user_role)
+        allowed_tables = rbac_rules.get('tables', [])
+        restrictions = rbac_rules.get('restrictions', {})
+        
+        if not allowed_tables:
+            return {"schema": {}, "message": "No tables accessible for this role"}
+        
+        # Get metadata configuration
+        conn = pyodbc.connect(
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE=query_learning_db;Trusted_Connection=yes;"
+        )
+        cursor = conn.cursor()
+        
+        # Build schema with metadata
+        schema = {}
+        for table_name in allowed_tables:
+            # Get metadata for this table
+            cursor.execute("""
+                SELECT column_name, friendly_name, is_visible
+                FROM table_metadata_config
+                WHERE system_id = ? AND table_name = ? AND is_visible = 1
+                ORDER BY column_name
+            """, (system_id, table_name))
+            
+            columns = cursor.fetchall()
+            
+            if not columns:
+                # No metadata configured
+                schema[table_name] = {
+                    'status': 'pending_configuration',
+                    'message': 'Table metadata configuration pending from admin'
+                }
+                continue
+            
+            # Apply column-level RBAC
+            table_restrictions = restrictions.get(table_name, {})
+            allowed_columns = table_restrictions.get('allowed_columns')
+            blocked_columns = table_restrictions.get('blocked_columns')
+            
+            filtered_columns = []
+            for col in columns:
+                col_name = col[0]
+                
+                # Check column RBAC
+                if allowed_columns and col_name not in allowed_columns:
+                    continue
+                if blocked_columns and col_name in blocked_columns:
+                    continue
+                
+                filtered_columns.append({
+                    'column_name': col_name,
+                    'friendly_name': col[1],
+                    'is_visible': col[2]
+                })
+            
+            if filtered_columns:
+                schema[table_name] = {
+                    'status': 'configured',
+                    'columns': filtered_columns
+                }
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "system_id": system_id,
+            "user_role": user_role,
+            "schema": schema,
+            "total_tables": len(schema)
+        }
+        
+    except Exception as e:
+        logger.error(f"Schema RBAC error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)
