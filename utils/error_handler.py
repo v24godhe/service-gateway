@@ -4,10 +4,28 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 import traceback
 import re
+import json
+import uuid
+from datetime import datetime
+from pydantic import BaseModel
 from utils.audit_logger import audit_logger
 from utils.response_formatter import response_formatter
-import json
-from datetime import datetime
+
+
+def json_serial(obj):
+    """JSON serializer for objects not serializable by default"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+class ErrorResponse(BaseModel):
+    error_code: str
+    message: str
+    timestamp: str
+    request_id: str
+    path: str
+
 
 class GlobalErrorHandler:
     
@@ -77,33 +95,50 @@ class GlobalErrorHandler:
     
     @staticmethod
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        """Handle request validation errors"""
-        # Sanitize validation errors
-        sanitized_errors = []
-        for error in exc.errors():
-            sanitized_error = {
-                "field": ".".join(str(x) for x in error["loc"][1:]),  # Skip 'body'
-                "message": GlobalErrorHandler.sanitize_error_message(error["msg"]),
-                "type": error["type"]
-            }
-            sanitized_errors.append(sanitized_error)
+        """Handle validation errors"""
+        request_id = str(uuid.uuid4())
         
-        # Log validation error
-        audit_logger.log_error(
-            request=request,
-            error=exc,
+        # Extract validation errors
+        validation_errors = []
+        for error in exc.errors():
+            validation_errors.append({
+                "field": str(error.get("loc", [])),
+                "message": error.get("msg", ""),
+                "type": error.get("type", "")
+            })
+        
+        error_response = ErrorResponse(
             error_code="VALIDATION_ERROR",
-            additional_context={"validation_errors": sanitized_errors}
+            message=str(exc),
+            timestamp=datetime.now().isoformat(),
+            request_id=request_id,
+            path=str(request.url.path)
         )
         
+        # Log to audit
+        audit_logger.error(json.dumps({
+            "request_id": request_id,
+            "timestamp": datetime.now().isoformat(),
+            "client_ip": request.client.host,
+            "endpoint": str(request.url.path),
+            "error_type": "RequestValidationError",
+            "error_message": str(exc),
+            "error_code": "VALIDATION_ERROR",
+            "additional_context": {
+                "validation_errors": validation_errors
+            }
+        }))
+        
         return JSONResponse(
-            status_code=exc.status_code,
-            content=json.loads(
-                json.dumps(
-                    response_formatter.error_response(...).dict(),
-                    default=str
-                )
-            )
+            status_code=422,
+            content={
+                "error_code": error_response.error_code,
+                "message": error_response.message,
+                "timestamp": error_response.timestamp,
+                "request_id": error_response.request_id,
+                "path": error_response.path,
+                "details": validation_errors
+            }
         )
     
     @staticmethod
@@ -122,14 +157,18 @@ class GlobalErrorHandler:
             }
         )
         
+        # Create error response
+        error_response = response_formatter.error_response(
+            message=sanitized_message,
+            error_code="INTERNAL_ERROR",
+            details=traceback.format_exc(),
+            request_id=getattr(request.state, 'request_id', None)
+        )
+        
         return JSONResponse(
             status_code=500,
-            content=response_formatter.error_response(
-                message="An unexpected error occurred",
-                error_code="INTERNAL_ERROR",
-                details="Please contact support with your request ID",
-                request_id=getattr(request.state, 'request_id', None)
-            ).dict()
+            content=json.loads(json.dumps(error_response.dict(), default=json_serial))
         )
+
 
 error_handler = GlobalErrorHandler()

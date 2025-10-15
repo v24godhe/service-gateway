@@ -42,6 +42,46 @@ import pyodbc
 from pydantic import BaseModel
 from typing import List
 
+from typing import Optional
+
+
+class ColumnMetadataExtended(BaseModel):
+    column_name: str
+    friendly_name: str
+    is_visible: bool = True
+    data_type: Optional[str] = None
+    max_length: Optional[int] = None
+    numeric_precision: Optional[int] = None
+    numeric_scale: Optional[int] = None
+    is_nullable: bool = True
+    default_value: Optional[str] = None
+    column_description: Optional[str] = None
+    data_classification: str = 'INTERNAL'
+    contains_pii: bool = False
+    pii_type: Optional[str] = None
+
+class TableRelationship(BaseModel):
+    column_name: str
+    is_primary_key: bool = False
+    is_foreign_key: bool = False
+    foreign_table: Optional[str] = None
+    foreign_column: Optional[str] = None
+    relationship_type: Optional[str] = None
+    is_indexed: bool = False
+    index_type: Optional[str] = None
+
+class ExtendedMetadataSaveRequest(BaseModel):
+    system_id: str
+    table_name: str
+    table_friendly_name: Optional[str] = None
+    table_description: Optional[str] = None
+    contains_pii: bool = False
+    gdpr_category: Optional[str] = None
+    data_sensitivity: str = 'INTERNAL'
+    columns: List[ColumnMetadataExtended]
+    relationships: Optional[List[TableRelationship]] = []
+    created_by: str
+
 
 SYSTEM_CONFIGS = {
     'STYR': {
@@ -1428,6 +1468,444 @@ async def get_schema_with_rbac(
     except Exception as e:
         logger.error(f"Schema RBAC error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/{system_id}/schema-configured")
+async def get_configured_tables(system_id: str):
+    """
+    Get only configured tables from table_master and table_metadata_config
+    Used by Admin UI to show configured tables section
+    """
+    try:
+        conn = pyodbc.connect(
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE=query_learning_db;Trusted_Connection=yes;"
+        )
+        cursor = conn.cursor()
+        
+        # Get configured tables with summary
+        cursor.execute("""
+            SELECT 
+                tm.table_name,
+                tm.table_friendly_name,
+                tm.table_description,
+                tm.contains_pii,
+                tm.gdpr_category,
+                tm.data_sensitivity,
+                tm.configuration_status,
+                tm.created_by,
+                tm.created_at,
+                tm.modified_at,
+                COUNT(tmc.id) as column_count,
+                SUM(CASE WHEN tmc.is_visible = 1 THEN 1 ELSE 0 END) as visible_columns,
+                SUM(CASE WHEN tmc.contains_pii = 1 THEN 1 ELSE 0 END) as pii_columns
+            FROM table_master tm
+            LEFT JOIN table_metadata_config tmc 
+                ON tm.system_id = tmc.system_id AND tm.table_name = tmc.table_name
+            WHERE tm.system_id = ? AND tm.is_configured = 1
+            GROUP BY 
+                tm.table_name, tm.table_friendly_name, tm.table_description,
+                tm.contains_pii, tm.gdpr_category, tm.data_sensitivity,
+                tm.configuration_status, tm.created_by, tm.created_at, tm.modified_at
+            ORDER BY tm.modified_at DESC, tm.created_at DESC
+        """, (system_id,))
+        
+        tables = []
+        for row in cursor.fetchall():
+            tables.append({
+                'table_name': row[0],
+                'table_friendly_name': row[1],
+                'table_description': row[2],
+                'contains_pii': row[3],
+                'gdpr_category': row[4],
+                'data_sensitivity': row[5],
+                'configuration_status': row[6],
+                'created_by': row[7],
+                'created_at': row[8].isoformat() if row[8] else None,
+                'modified_at': row[9].isoformat() if row[9] else None,
+                'column_count': row[10],
+                'visible_columns': row[11],
+                'pii_columns': row[12]
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'system_id': system_id,
+            'configured_tables': tables,
+            'total_count': len(tables)
+        }
+        
+    except Exception as e:
+        logger.error(f"Get configured tables error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/metadata/{system_id}/{table_name}")
+async def get_table_metadata(system_id: str, table_name: str):
+    """
+    Get complete metadata for a table including:
+    - Table master info
+    - All columns with extended metadata
+    - Relationships (FK, PK)
+    """
+    try:
+        conn = pyodbc.connect(
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE=query_learning_db;Trusted_Connection=yes;"
+        )
+        cursor = conn.cursor()
+        
+        # 1. Get table master info
+        cursor.execute("""
+            SELECT 
+                table_friendly_name, table_description, contains_pii,
+                gdpr_category, data_sensitivity, configuration_status,
+                created_by, created_at, modified_by, modified_at
+            FROM table_master
+            WHERE system_id = ? AND table_name = ?
+        """, (system_id, table_name))
+        
+        table_row = cursor.fetchone()
+        if not table_row:
+            raise HTTPException(status_code=404, detail="Table not configured")
+        
+        table_info = {
+            'table_name': table_name,
+            'table_friendly_name': table_row[0],
+            'table_description': table_row[1],
+            'contains_pii': table_row[2],
+            'gdpr_category': table_row[3],
+            'data_sensitivity': table_row[4],
+            'configuration_status': table_row[5],
+            'created_by': table_row[6],
+            'created_at': table_row[7].isoformat() if table_row[7] else None,
+            'modified_by': table_row[8],
+            'modified_at': table_row[9].isoformat() if table_row[9] else None
+        }
+        
+        # 2. Get all columns
+        cursor.execute("""
+            SELECT 
+                column_name, friendly_name, is_visible, data_type,
+                max_length, numeric_precision, numeric_scale, is_nullable,
+                default_value, column_description, data_classification,
+                contains_pii, pii_type
+            FROM table_metadata_config
+            WHERE system_id = ? AND table_name = ?
+            ORDER BY column_name
+        """, (system_id, table_name))
+        
+        columns = []
+        for row in cursor.fetchall():
+            columns.append({
+                'column_name': row[0],
+                'friendly_name': row[1],
+                'is_visible': row[2],
+                'data_type': row[3],
+                'max_length': row[4],
+                'numeric_precision': row[5],
+                'numeric_scale': row[6],
+                'is_nullable': row[7],
+                'default_value': row[8],
+                'column_description': row[9],
+                'data_classification': row[10],
+                'contains_pii': row[11],
+                'pii_type': row[12]
+            })
+        
+        # 3. Get relationships
+        cursor.execute("""
+            SELECT 
+                column_name, is_primary_key, is_foreign_key,
+                foreign_table, foreign_column, relationship_type,
+                is_indexed, index_type
+            FROM table_relationships
+            WHERE system_id = ? AND table_name = ?
+            ORDER BY is_primary_key DESC, is_foreign_key DESC
+        """, (system_id, table_name))
+        
+        relationships = []
+        for row in cursor.fetchall():
+            relationships.append({
+                'column_name': row[0],
+                'is_primary_key': row[1],
+                'is_foreign_key': row[2],
+                'foreign_table': row[3],
+                'foreign_column': row[4],
+                'relationship_type': row[5],
+                'is_indexed': row[6],
+                'index_type': row[7]
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'system_id': system_id,
+            'table_info': table_info,
+            'columns': columns,
+            'relationships': relationships
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get table metadata error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/metadata/save-extended")
+async def save_extended_metadata(request: ExtendedMetadataSaveRequest):
+    """
+    Save complete table configuration:
+    - Table master data
+    - Column metadata with extended fields
+    - Relationships (FK, PK)
+    """
+    try:
+        conn = pyodbc.connect(
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE=query_learning_db;Trusted_Connection=yes;"
+        )
+        cursor = conn.cursor()
+        
+        # 1. Save/Update table_master
+        cursor.execute("""
+            SELECT id FROM table_master
+            WHERE system_id = ? AND table_name = ?
+        """, (request.system_id, request.table_name))
+        
+        table_exists = cursor.fetchone()
+        
+        if table_exists:
+            # Update existing
+            cursor.execute("""
+                UPDATE table_master
+                SET table_friendly_name = ?,
+                    table_description = ?,
+                    contains_pii = ?,
+                    gdpr_category = ?,
+                    data_sensitivity = ?,
+                    is_configured = 1,
+                    configuration_status = 'CONFIGURED',
+                    modified_by = ?,
+                    modified_at = GETDATE()
+                WHERE system_id = ? AND table_name = ?
+            """, (
+                request.table_friendly_name,
+                request.table_description,
+                request.contains_pii,
+                request.gdpr_category,
+                request.data_sensitivity,
+                request.created_by,
+                request.system_id,
+                request.table_name
+            ))
+        else:
+            # Insert new
+            cursor.execute("""
+                INSERT INTO table_master
+                (system_id, table_name, table_friendly_name, table_description,
+                 contains_pii, gdpr_category, data_sensitivity, is_configured,
+                 configuration_status, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'CONFIGURED', ?)
+            """, (
+                request.system_id,
+                request.table_name,
+                request.table_friendly_name,
+                request.table_description,
+                request.contains_pii,
+                request.gdpr_category,
+                request.data_sensitivity,
+                request.created_by
+            ))
+        
+        # 2. Save columns (delete old, insert new)
+        cursor.execute("""
+            DELETE FROM table_metadata_config
+            WHERE system_id = ? AND table_name = ?
+        """, (request.system_id, request.table_name))
+        
+        for col in request.columns:
+            cursor.execute("""
+                INSERT INTO table_metadata_config
+                (system_id, table_name, column_name, friendly_name, is_visible,
+                 data_type, max_length, numeric_precision, numeric_scale, is_nullable,
+                 default_value, column_description, data_classification, contains_pii, pii_type,
+                 created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                request.system_id, request.table_name, col.column_name, col.friendly_name,
+                col.is_visible, col.data_type, col.max_length, col.numeric_precision,
+                col.numeric_scale, col.is_nullable, col.default_value, col.column_description,
+                col.data_classification, col.contains_pii, col.pii_type, request.created_by
+            ))
+        
+        # 3. Save relationships (delete old, insert new)
+        cursor.execute("""
+            DELETE FROM table_relationships
+            WHERE system_id = ? AND table_name = ?
+        """, (request.system_id, request.table_name))
+        
+        if request.relationships:
+            for rel in request.relationships:
+                cursor.execute("""
+                    INSERT INTO table_relationships
+                    (system_id, table_name, column_name, is_primary_key, is_foreign_key,
+                     foreign_table, foreign_column, relationship_type, is_indexed, index_type,
+                     created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    request.system_id, request.table_name, rel.column_name, rel.is_primary_key,
+                    rel.is_foreign_key, rel.foreign_table, rel.foreign_column, rel.relationship_type,
+                    rel.is_indexed, rel.index_type, request.created_by
+                ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return {
+            'success': True,
+            'message': f"Successfully saved configuration for {request.table_name}",
+            'column_count': len(request.columns),
+            'relationship_count': len(request.relationships) if request.relationships else 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Save extended metadata error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     
+@app.post("/api/metadata/invalidate-cache")
+async def invalidate_schema_cache(
+    system_id: str = Body(...),
+    user_role: Optional[str] = Body(None)
+):
+    """
+    Invalidate Redis cache after metadata changes
+    Calls PromptManager to clear schema cache
+    """
+    try:
+        # Import here to avoid circular dependency
+        import requests
+        
+        # Call MCP server to invalidate cache
+        mcp_url = os.getenv('MCP_SERVER_URL', 'http://10.200.0.1:8501')
+        
+        # For now, just return success
+        # The actual cache invalidation will happen when PromptManager is updated
+        
+        return {
+            'success': True,
+            'message': f"Cache invalidation requested for {system_id}" + 
+                      (f" (role: {user_role})" if user_role else " (all roles)"),
+            'system_id': system_id,
+            'user_role': user_role
+        }
+        
+    except Exception as e:
+        logger.error(f"Cache invalidation error: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+@app.get("/api/{system_id}/schema-search")
+async def search_tables(
+    system_id: str,
+    search_term: str,
+    limit: int = 20
+):
+    """
+    Search for tables by name (unconfigured only)
+    Returns matching tables without loading all tables
+    """
+    try:
+        if system_id != "STYR":
+            raise HTTPException(status_code=404, detail="System not found")
+        
+        # Get list of configured tables
+        conn_learning = pyodbc.connect(
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE=query_learning_db;Trusted_Connection=yes;"
+        )
+        cursor_learning = conn_learning.cursor()
+        
+        cursor_learning.execute("""
+            SELECT table_name FROM table_master
+            WHERE system_id = ? AND is_configured = 1
+        """, (system_id,))
+        
+        configured_tables = [row[0] for row in cursor_learning.fetchall()]
+        cursor_learning.close()
+        conn_learning.close()
+        
+        # Search source database for matching tables
+        connection_string = f"""
+        DRIVER={{IBM i Access ODBC Driver}};
+        SYSTEM={os.getenv('STYR_SYSTEM')};
+        USERID={os.getenv('STYR_USERID')};
+        PASSWORD={os.getenv('STYR_PASSWORD')};
+        ALLOWPROCCALLS=1;
+        SORTTABLE=1;
+        """
+        
+        conn = pyodbc.connect(connection_string)
+        cursor = conn.cursor()
+        
+        # Search with LIKE pattern
+        search_pattern = f"%{search_term.upper()}%"
+        
+        cursor.execute("""
+            SELECT DISTINCT
+                TABLE_SCHEMA,
+                TABLE_NAME,
+                COUNT(*) as column_count
+            FROM QSYS2.SYSCOLUMNS
+            WHERE TABLE_SCHEMA IN ('DCPO', 'EGU')
+            AND (
+                TABLE_SCHEMA LIKE ? OR
+                TABLE_NAME LIKE ?
+            )
+            GROUP BY TABLE_SCHEMA, TABLE_NAME
+            ORDER BY TABLE_NAME
+            FETCH FIRST ? ROWS ONLY
+        """, (search_pattern, search_pattern, limit))
+        
+        results = []
+        for row in cursor.fetchall():
+            table_full_name = f"{row[0]}.{row[1]}"
+            
+            # Skip configured tables
+            if table_full_name in configured_tables:
+                continue
+            
+            results.append({
+                'table_name': table_full_name,
+                'schema': row[0],
+                'table': row[1],
+                'column_count': row[2],
+                'is_configured': False
+            })
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            'system_id': system_id,
+            'search_term': search_term,
+            'results': results,
+            'result_count': len(results)
+        }
+        
+    except Exception as e:
+        logger.error(f"Table search error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)

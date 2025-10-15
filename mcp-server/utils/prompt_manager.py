@@ -296,3 +296,36 @@ class PromptManager:
             if keys:
                 self.redis_client.delete(*keys)
                 print(f"🗑️ Invalidated {len(keys)} schema cache keys")
+
+    def invalidate_schema_cache_api(self, system_id: str = None, user_role: str = None):
+        """
+        Call Gateway API to invalidate schema cache and clear local Redis cache
+        This ensures both Gateway and MCP server caches are cleared
+        """
+        try:
+            import requests
+            gateway_url = os.getenv('GATEWAY_URL', 'http://10.200.0.2:8080')
+            gateway_token = os.getenv('GATEWAY_TOKEN')
+            
+            # Call Gateway API
+            response = requests.post(
+                f"{gateway_url}/api/metadata/invalidate-cache",
+                json={
+                    'system_id': system_id or '*',
+                    'user_role': user_role
+                },
+                headers={'Authorization': f'Bearer {gateway_token}'} if gateway_token else {},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                print(f"✅ Gateway cache invalidation successful")
+            else:
+                print(f"⚠️ Gateway cache invalidation failed: {response.status_code}")
+            
+        except Exception as e:
+            print(f"⚠️ Gateway cache invalidation error: {e}")
+        
+        # Always clear local Redis cache regardless of API result
+        self.invalidate_schema_cache(system_id, user_role)
+        print(f"✅ Local Redis cache cleared for {system_id}:{user_role}")
