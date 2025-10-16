@@ -397,12 +397,28 @@ def generate_sql(question: str, username: str, conversation_history=None, role_c
 
     ACTION: Use the most relevant context from above based on the user's question.
     """
+            
+    schema_from_db = pm.get_variable(system_id, 'DATABASE_SCHEMA')
+    schema_to_use = schema_from_db #if schema_from_db else DATABASE_SCHEMA
+
+    from datetime import datetime, timedelta
+    today = datetime.now()
+    schema_to_use = schema_to_use.format(
+        today=today.strftime("%Y%m%d"),
+        week_start=(today - timedelta(days=today.weekday())).strftime("%Y%m%d"),
+        week_end=(today + timedelta(days=6-today.weekday())).strftime("%Y%m%d"),
+        month_start=today.replace(day=1).strftime("%Y%m%d"),
+        month_end=(today.replace(day=28) + timedelta(days=4)).replace(day=1).strftime("%Y%m%d") if today.month < 12 else today.replace(month=12, day=31).strftime("%Y%m%d"),
+        last_month_start=(today.replace(day=1) - timedelta(days=1)).replace(day=1).strftime("%Y%m%d"),
+        last_month_end=(today.replace(day=1) - timedelta(days=1)).strftime("%Y%m%d"),
+        year_start=today.replace(month=1, day=1).strftime("%Y%m%d")
+    )
        
     sql_prompt = f"""
     Role Context:
     {role_ctx}
 
-    {DATABASE_SCHEMA}
+    {schema_to_use}
     
     {SQL_GENERATION_PROMPT}
     

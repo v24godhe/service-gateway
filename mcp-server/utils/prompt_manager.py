@@ -249,8 +249,11 @@ class PromptManager:
                         schema_text += f"## {table_name}\n"
                         columns = table_info.get('columns', [])
                         for col in columns:
-                            schema_text += f"- {col['friendly_name']} ({col['column_name']})\n"
-                        schema_text += "\n"
+                            # Show technical name first, friendly name in parentheses
+                            schema_text += f"- {col['column_name']}"
+                            if col.get('friendly_name') and col['friendly_name'] != col['column_name']:
+                                schema_text += f" ({col['friendly_name']})"
+                            schema_text += f" - {col.get('data_type', 'VARCHAR')}\n"
             
             # Cache for 2 hours
             self.redis_client.setex(cache_key, 7200, schema_text)

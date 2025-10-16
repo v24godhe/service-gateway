@@ -116,18 +116,14 @@ class GlobalErrorHandler:
         )
         
         # Log to audit
-        audit_logger.error(json.dumps({
-            "request_id": request_id,
-            "timestamp": datetime.now().isoformat(),
-            "client_ip": request.client.host,
-            "endpoint": str(request.url.path),
-            "error_type": "RequestValidationError",
-            "error_message": str(exc),
-            "error_code": "VALIDATION_ERROR",
-            "additional_context": {
+        audit_logger.log_error(
+            request=request,
+            error=exc,
+            error_code="VALIDATION_ERROR",
+            additional_context={
                 "validation_errors": validation_errors
             }
-        }))
+        )
         
         return JSONResponse(
             status_code=422,

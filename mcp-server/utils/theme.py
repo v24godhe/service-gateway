@@ -1,99 +1,181 @@
+# utils/theme.py
+
 """
-Förlagssystem - Modern Landing Page
-Location: ~/forlagssystem-mcp/mcp-server/Home.py
-Entry point for the multipage app with modern theme styling
+Theme definitions for Analytics Chat Assistant and other Streamlit pages.
+Each theme is a complete CSS <style> block that can be injected via st.markdown.
 """
 
-import streamlit as st
-from datetime import datetime
+THEMES = {
+    "Light": """
+    <style>
+        :root {
+            --primary-color: #0073AE;
+            --secondary-bg: #0F2436;
+            --background-color: #F4F6FA;
+            --text-color: #0F2436;
+            --radius: 12px;
+        }
 
-st.set_page_config(
-    page_title="Förlagssystem - AI Hub",
-    page_icon="🏢",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+        .main {
+            background-color: var(--background-color);
+        }
 
-# --- Main Layout ---
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    st.image(
-        "https://www.forlagssystem.se/wp-content/uploads/2023/02/forlagssystem_logo.svg",
-        use_container_width=True
-    )
-    st.markdown("<h1 style='text-align:center; margin-top:30px;'>AI-Powered Enterprise Hub</h1>", unsafe_allow_html=True)
-    st.markdown("<p class='hero-text'>Your intelligent assistant for business data and system management</p>", unsafe_allow_html=True)
-    st.markdown("---")
+        h1, h2, h3 {
+            color: var(--text-color);
+            font-weight: 700;
+        }
 
-# --- Feature Cards ---
-col1, col2 = st.columns(2)
+        /* Chat Bubbles */
+        .user-message {
+            background: var(--primary-color);
+            color: white;
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin: 0.5rem 0;
+            max-width: 75%;
+            margin-left: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        }
 
-with col1:
-    st.markdown("""
-    <div class="feature-card">
-        <h2>💬 AI Chat Assistant</h2>
-        <p>Ask questions in natural language and get instant answers from your business data.</p>
-        <ul>
-            <li>Natural language queries</li>
-            <li>Real-time data access</li>
-            <li>Role-based permissions</li>
-            <li>Conversation memory</li>
-            <li>Export to PDF/Excel</li>
-            <li>Follow-up question handling</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    if st.button("🚀 Open Chat Assistant", key="chat_btn"):
-        st.switch_page("pages/1_💬_Chat_Assistant.py")
+        .assistant-message {
+            background: white;
+            padding: 1rem;
+            border-radius: var(--radius);
+            margin: 0.5rem 0;
+            max-width: 75%;
+            border-left: 5px solid var(--primary-color);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: all 0.2s ease;
+        }
 
-with col2:
-    st.markdown("""
-    <div class="feature-card">
-        <h2>🔐 Admin Dashboard</h2>
-        <p>Manage user permissions, approve access requests, and monitor system activity.</p>
-        <ul>
-            <li>Permission management</li>
-            <li>One-click approve/deny</li>
-            <li>RBAC rule editor</li>
-            <li>Audit trail viewing</li>
-            <li>Real-time statistics</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-    if st.button("🛡️ Open Admin Dashboard", key="admin_btn"):
-        st.switch_page("pages/2_🔐_Admin_Dashboard.py")
+        /* Buttons */
+        .stButton>button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            padding: 0.5rem 1.5rem;
+            transition: all 0.2s ease;
+        }
+        .stButton>button:hover {
+            background-color: #005a8a;
+            transform: translateY(-2px);
+        }
 
-st.markdown("<br>", unsafe_allow_html=True)
+        /* Inputs */
+        .stTextInput>div>div>input {
+            border-radius: 30px;
+            border: 2px solid var(--primary-color);
+            padding: 0.8rem 1.2rem;
+        }
 
-# --- Statistics Row ---
-st.markdown("### 📊 System Overview")
-col1, col2, col3, col4 = st.columns(4)
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background-color: var(--secondary-bg);
+            color: white;
+        }
 
-stats = [
-    ("5", "Active Roles"),
-    ("11", "Database Tables"),
-    ("40+", "RBAC Rules"),
-    ("24/7", "Availability")
-]
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3 {
+            color: white;
+        }
 
-for col, (value, label) in zip([col1, col2, col3, col4], stats):
-    col.markdown(f"""
-    <div class="stats-box">
-        <h3>{value}</h3>
-        <p>{label}</p>
-    </div>
-    """, unsafe_allow_html=True)
+        .metric-label, .metric-value {
+            color: white !important;
+        }
 
-st.markdown("<br><br>", unsafe_allow_html=True)
+        [data-testid="stSidebar"] * {
+            color: white !important;
+        }
 
-# --- Footer ---
-st.markdown("---")
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    st.markdown(f"""
-    <p style='text-align: center; color: #999; font-size: 14px;'>
-        Förlagssystem AB | AI Enterprise Hub v2.0<br>
-        System Time: {current_time}
-    </p>
-    """, unsafe_allow_html=True)
+        [data-testid="stSidebar"] .stSelectbox label,
+        [data-testid="stSidebar"] .stButton button,
+        [data-testid="stSidebar"] .stMarkdown,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] span {
+            color: white !important;
+        }
+
+        [data-testid="stSidebar"] .stSelectbox > div > div {
+            background-color: rgba(255,255,255,0.1);
+            color: white;
+        }
+    </style>
+    """,
+
+    "Compact": """
+    <style>
+        :root {
+            --primary-color: #0073AE;
+            --background-color: #f2f4f8;
+            --secondary-bg: #0F2436;
+            --text-color: #0F2436;
+        }
+
+        .main {
+            background-color: var(--background-color);
+        }
+
+        .stButton>button {
+            background-color: var(--primary-color);
+            color: white;
+            border-radius: 8px;
+            padding: 0.5rem 2rem;
+            font-weight: 600;
+            border: none;
+            transition: all 0.3s;
+        }
+
+        .stButton>button:hover {
+            background-color: #005a8a;
+            transform: translateY(-2px);
+        }
+
+        .approve-button>button {
+            background-color: #28a745;
+        }
+
+        .deny-button>button {
+            background-color: #dc3545;
+        }
+
+        h1, h2, h3 {
+            color: var(--text-color);
+            font-weight: 700;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            border-left: 4px solid var(--primary-color);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .request-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-left: 4px solid #ffc107;
+        }
+
+        .approved-card {
+            border-left: 4px solid #28a745;
+        }
+
+        .denied-card {
+            border-left: 4px solid #dc3545;
+        }
+
+        .stTextInput>div>div>input {
+            border-radius: 8px;
+            border: 2px solid var(--primary-color);
+        }
+    </style>
+    """
+}
