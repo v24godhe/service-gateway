@@ -140,7 +140,7 @@ app.add_middleware(RequestTrackingMiddleware)
 db_connector = StyrDatabaseConnector()
 order_service = OrderService(db_connector)
 customer_service = CustomerService(db_connector)
-query_service = QueryService(db_connector)
+query_service = QueryService(db_connector,)
 
 
 # Initialize Query Learning Service with Windows Auth
