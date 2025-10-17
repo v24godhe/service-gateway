@@ -192,84 +192,212 @@ class PromptManager:
 
         return final_prompt
 
+    # def get_dynamic_schema(self, system_id: str, user_role: str) -> str:
+    #     """
+    #     Load system schema with RBAC filtering from Service Gateway API
+    #     Uses table_metadata_config and rbac_rules_dynamic
+
+    #     Args:
+    #         system_id: System identifier (e.g., 'STYR')
+    #         user_role: User role for RBAC filtering
+
+    #     Returns:
+    #         Formatted schema text for prompt injection
+    #     """
+    #     cache_key = f"schema:{system_id}:{user_role}"
+
+    #     # Try Redis cache first
+    #     cached = self.redis_client.get(cache_key)
+    #     if cached:
+    #         print(f"✅ Schema cache hit for {system_id}:{user_role}")
+    #         return cached
+
+    #     # Call Service Gateway API
+    #     try:
+    #         import requests
+    #         gateway_url = os.getenv('GATEWAY_URL', 'http://10.200.0.2:8080')
+    #         gateway_token = os.getenv('GATEWAY_TOKEN')
+
+    #         print(f"🔍 Fetching schema from Gateway for {system_id}:{user_role}")
+
+    #         response = requests.get(
+    #             f"{gateway_url}/api/{system_id}/schema-with-rbac",
+    #             params={'user_role': user_role},
+    #             headers={'Authorization': f'Bearer {gateway_token}'} if gateway_token else {},
+    #             timeout=10
+    #         )
+
+    #         if response.status_code != 200:
+    #             error_msg = f"# Schema unavailable for {system_id} (Status: {response.status_code})"
+    #             print(f"❌ {error_msg}")
+    #             return error_msg
+
+    #         data = response.json()
+    #         schema_dict = data.get('schema', {})
+
+    #         # Format schema for prompt
+    #         schema_text = f"# DATABASE SCHEMA FOR {system_id} (Role: {user_role})\n\n"
+
+    #         if not schema_dict:
+    #             schema_text += "⚠️ No tables accessible for this role\n"
+    #         else:
+    #             for table_name, table_info in schema_dict.items():
+    #                 if table_info.get('status') == 'pending_configuration':
+    #                     schema_text += f"## {table_name}\n"
+    #                     schema_text += f"⚠️ {table_info.get('message')}\n\n"
+    #                 elif table_info.get('status') == 'configured':
+    #                     schema_text += f"## {table_name}\n"
+    #                     columns = table_info.get('columns', [])
+    #                     for col in columns:
+    #                         # Show technical name first, friendly name in parentheses
+    #                         schema_text += f"- {col['column_name']}"
+    #                         if col.get('friendly_name') and col['friendly_name'] != col['column_name']:
+    #                             schema_text += f" ({col['friendly_name']})"
+    #                         schema_text += f" - {col.get('data_type', 'VARCHAR')}\n"
+
+    #         # Cache for 2 hours
+    #         self.redis_client.setex(cache_key, 7200, schema_text)
+    #         print(f"✅ Schema cached for {system_id}:{user_role}")
+
+    #         return schema_text
+
+    #     except requests.exceptions.RequestException as e:
+    #         error_msg = f"# Schema loading error: Connection failed - {str(e)}"
+    #         print(f"❌ {error_msg}")
+    #         return error_msg
+    #     except Exception as e:
+    #         error_msg = f"# Schema loading error: {str(e)}"
+    #         print(f"❌ {error_msg}")
+    #         return error_msg
+
+
     def get_dynamic_schema(self, system_id: str, user_role: str) -> str:
         """
-        Load system schema with RBAC filtering from Service Gateway API
-        Uses table_metadata_config and rbac_rules_dynamic
-
+        Load system schema with RBAC filtering and relationship detection
+        Enhanced version with full column details and AI-detected relationships
+        
         Args:
             system_id: System identifier (e.g., 'STYR')
-            user_role: User role for RBAC filtering
-
+            user_role: User role for RBAC filtering (e.g., 'ceo', 'call_center')
+            
         Returns:
-            Formatted schema text for prompt injection
+            Comprehensive schema text with tables, columns, and relationships
         """
         cache_key = f"schema:{system_id}:{user_role}"
-
+        
         # Try Redis cache first
         cached = self.redis_client.get(cache_key)
         if cached:
             print(f"✅ Schema cache hit for {system_id}:{user_role}")
             return cached
-
-        # Call Service Gateway API
+        
+        print(f"🔍 Generating dynamic schema for {system_id}:{user_role}")
+        
+        # Generate comprehensive schema using relationship detector
         try:
+            import asyncio
+            from utils.relationship_detector import generate_dynamic_schema_for_user
+            
+            # Generate schema with AI relationship detection
+            schema_text = asyncio.run(generate_dynamic_schema_for_user(user_role, system_id))
+            
+            # Cache for 2 hours (schemas don't change often)
+            self.redis_client.setex(cache_key, 7200, schema_text)
+            
+            print(f"✅ Generated and cached schema for {system_id}:{user_role}")
+            return schema_text
+            
+        except Exception as e:
+            print(f"❌ Dynamic schema generation failed: {e}")
+            
+            # Fallback to basic schema
+            return self._fallback_basic_schema(system_id, user_role)
+
+    def _fallback_basic_schema(self, system_id: str, user_role: str) -> str:
+        """Fallback to basic schema if dynamic generation fails"""
+        
+        try:
+            # Use existing API call method
             import requests
             gateway_url = os.getenv('GATEWAY_URL', 'http://10.200.0.2:8080')
             gateway_token = os.getenv('GATEWAY_TOKEN')
-
-            print(f"🔍 Fetching schema from Gateway for {system_id}:{user_role}")
-
+            
             response = requests.get(
                 f"{gateway_url}/api/{system_id}/schema-with-rbac",
                 params={'user_role': user_role},
                 headers={'Authorization': f'Bearer {gateway_token}'} if gateway_token else {},
                 timeout=10
             )
-
-            if response.status_code != 200:
-                error_msg = f"# Schema unavailable for {system_id} (Status: {response.status_code})"
-                print(f"❌ {error_msg}")
-                return error_msg
-
-            data = response.json()
-            schema_dict = data.get('schema', {})
-
-            # Format schema for prompt
-            schema_text = f"# DATABASE SCHEMA FOR {system_id} (Role: {user_role})\n\n"
-
-            if not schema_dict:
-                schema_text += "⚠️ No tables accessible for this role\n"
-            else:
+            
+            if response.status_code == 200:
+                data = response.json()
+                schema_dict = data.get('schema', {})
+                
+                # Format basic schema
+                lines = [
+                    f"# BASIC SCHEMA FOR {system_id} - Role: {user_role}",
+                    f"# {len(schema_dict)} tables available",
+                    ""
+                ]
+                
                 for table_name, table_info in schema_dict.items():
-                    if table_info.get('status') == 'pending_configuration':
-                        schema_text += f"## {table_name}\n"
-                        schema_text += f"⚠️ {table_info.get('message')}\n\n"
-                    elif table_info.get('status') == 'configured':
-                        schema_text += f"## {table_name}\n"
-                        columns = table_info.get('columns', [])
-                        for col in columns:
-                            # Show technical name first, friendly name in parentheses
-                            schema_text += f"- {col['column_name']}"
-                            if col.get('friendly_name') and col['friendly_name'] != col['column_name']:
-                                schema_text += f" ({col['friendly_name']})"
-                            schema_text += f" - {col.get('data_type', 'VARCHAR')}\n"
-
-            # Cache for 2 hours
-            self.redis_client.setex(cache_key, 7200, schema_text)
-            print(f"✅ Schema cached for {system_id}:{user_role}")
-
-            return schema_text
-
-        except requests.exceptions.RequestException as e:
-            error_msg = f"# Schema loading error: Connection failed - {str(e)}"
-            print(f"❌ {error_msg}")
-            return error_msg
+                    lines.append(f"TABLE: {table_name}")
+                    columns = table_info.get('columns', [])
+                    if columns:
+                        lines.append("COLUMNS:")
+                        for col in columns[:10]:  # Limit for fallback
+                            lines.append(f"  - {col.get('column_name', '')}: {col.get('friendly_name', '')}")
+                        if len(columns) > 10:
+                            lines.append(f"  ... and {len(columns) - 10} more columns")
+                    lines.append("")
+                
+                return '\n'.join(lines)
+            else:
+                return f"# Error: Schema unavailable (Status: {response.status_code})"
+                
         except Exception as e:
-            error_msg = f"# Schema loading error: {str(e)}"
-            print(f"❌ {error_msg}")
-            return error_msg
+            return f"# Error: Fallback schema failed - {str(e)}"
 
+    def invalidate_schema_cache(self, system_id: str, user_role: str = None):
+        """Invalidate schema cache for specific system/role or all roles"""
+        
+        if user_role:
+            # Invalidate specific role
+            cache_key = f"schema:{system_id}:{user_role}"
+            self.redis_client.delete(cache_key)
+            print(f"🗑️ Invalidated schema cache for {system_id}:{user_role}")
+        else:
+            # Invalidate all roles for system
+            pattern = f"schema:{system_id}:*"
+            for key in self.redis_client.scan_iter(match=pattern):
+                self.redis_client.delete(key)
+            print(f"🗑️ Invalidated all schema cache for {system_id}")
+
+    def get_schema_statistics(self, system_id: str = "STYR") -> Dict[str, Any]:
+        """Get statistics about schema generation and caching"""
+        
+        stats = {
+            'system_id': system_id,
+            'cache_keys': [],
+            'total_cached_schemas': 0,
+            'roles_with_cache': []
+        }
+        
+        try:
+            # Find all schema cache keys for this system
+            pattern = f"schema:{system_id}:*"
+            for key in self.redis_client.scan_iter(match=pattern):
+                stats['cache_keys'].append(key)
+                role = key.split(':')[-1]
+                stats['roles_with_cache'].append(role)
+            
+            stats['total_cached_schemas'] = len(stats['cache_keys'])
+            
+            return stats
+            
+        except Exception as e:
+            stats['error'] = str(e)
+            return stats
 
     def invalidate_schema_cache(self, system_id: str = None, user_role: str = None):
         """

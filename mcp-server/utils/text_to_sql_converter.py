@@ -191,18 +191,18 @@ def clean_sql_output(sql: str) -> str:
 
 
 
-def generate_sql(question: str, username: str, conversation_history=None, role_context_override="", system_id: str = "STYR") -> str:
+def generate_sql(question: str, user_role: str, conversation_history=None, role_context_override="", system_id: str = "STYR") -> str:
     """Generate SQL using UNIVERSAL context memory - remembers ALL entities and topics"""
     
     print("🎯 CALLED: generate_sql()")
     pm = get_prompt_manager()
-    DATABASE_SCHEMA = pm.get_dynamic_schema(system_id, username)
+    DATABASE_SCHEMA = pm.get_dynamic_schema(system_id, user_role)
     print(f"🎯 Schema length: {len(DATABASE_SCHEMA)}")
     print(f"🎯 Schema contains KHEML: {'KHEML' in DATABASE_SCHEMA}")
 
     # Load role prompt from database, fallback to hardcoded
-    role_ctx_from_db = pm.get_prompt(system_id, 'ROLE_SYSTEM', username)
-    role_ctx = role_context_override or role_ctx_from_db or ROLE_PROMPTS.get(username, "")
+    role_ctx_from_db = pm.get_prompt(system_id, 'ROLE_SYSTEM', user_role)
+    role_ctx = role_context_override or role_ctx_from_db or ROLE_PROMPTS.get(user_role, "")
     
     # Universal entity extraction
     chat_context = ""
