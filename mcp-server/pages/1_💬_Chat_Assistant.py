@@ -348,8 +348,6 @@ def handle_sql_generation_with_ai_analysis(question: str, username: str):
     use_smart_analysis = st.session_state.get('use_smart_analysis', True)
     
     if not enable_permission_check:
-        # Use traditional SQL generation
-        from utils.text_to_sql_converter import generate_sql_with_session_context
         return generate_sql_with_session_context(question, username, session_id)
     
     if use_smart_analysis:
@@ -402,8 +400,8 @@ def handle_sql_generation_with_ai_analysis(question: str, username: str):
             missing_tables = analysis_result.get('missing_tables', [])
             
             # Use existing SQL generation but add analysis context
-            from utils.text_to_sql_converter import generate_sql_with_session_context
-            sql = handle_sql_generation_with_ai_analysis(user_input, st.session_state.username)
+            sql = generate_sql_with_session_context(question, username, session_id)
+            st.write(f"DEBUG: Analysis result: {analysis_result}")
             
             # Add analysis comments
             comments = []
@@ -419,7 +417,6 @@ def handle_sql_generation_with_ai_analysis(question: str, username: str):
         except Exception as e:
             st.error(f"AI Analysis failed: {e}")
             # Fallback to traditional generation
-            from utils.text_to_sql_converter import generate_sql_with_session_context
             return generate_sql_with_session_context(question, username, session_id)
     
     else:
@@ -816,9 +813,8 @@ else:
 
         with st.spinner("Analyzing..."):
             try:
-                sql = handle_sql_generation_with_ai_analysis(user_input, st.session_state.username)
-                print(f"DEBUG SQL = {sql}")
-
+                sql = generate_sql_with_session_context(user_input, username)
+                st.write(f"DEBUG: Analysis sql: {sql}")
                 if not sql or not sql.strip().upper().startswith("SELECT"):
                     response = (
                         "I can only retrieve information from the system; "
