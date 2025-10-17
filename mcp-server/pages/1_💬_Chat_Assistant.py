@@ -18,6 +18,7 @@ from utils.system_manager import SystemManager
 from utils.prompt_manager import PromptManager
 import streamlit as st
 from utils.theme import THEMES
+from utils.table_analyzer_ai import analyze_tables_sync
 
 load_dotenv()
 
@@ -335,7 +336,102 @@ def update_conversation_context(user_question: str, generated_sql: str, tables_u
         st.sidebar.error(f"⚠️ Context update error: {str(e)}")
         return False
 
-
+def handle_sql_generation_with_ai_analysis(question: str, username: str):
+    """
+    Enhanced SQL generation with AI table analysis
+    REPLACE existing handle_sql_generation function
+    """
+    
+    session_id = st.session_state.get('session_id', None)
+    system_id = st.session_state.get('selected_system', 'STYR')
+    enable_permission_check = st.session_state.get('enable_permission_check', True)
+    use_smart_analysis = st.session_state.get('use_smart_analysis', True)
+    
+    if not enable_permission_check:
+        # Use traditional SQL generation
+        from utils.text_to_sql_converter import generate_sql_with_session_context
+        return generate_sql_with_session_context(question, username, session_id)
+    
+    if use_smart_analysis:
+        # Use AI table analysis
+        try:
+            # Analyze question with AI
+            analysis_result = analyze_tables_sync(question, username, system_id)
+            
+            # Store analysis in session state for display in sidebar
+            st.session_state.last_analysis = analysis_result
+            
+            if not analysis_result.get('success'):
+                return f"-- Analysis failed: {analysis_result.get('error', 'Unknown error')}"
+            
+            # Check if user can execute
+            if not analysis_result.get('can_execute'):
+                missing_tables = analysis_result.get('missing_tables', [])
+                
+                # Auto-request missing permissions
+                if missing_tables:
+                    from utils.table_analyzer_ai import create_table_analyzer
+                    analyzer = create_table_analyzer()
+                    
+                    try:
+                        import asyncio
+                        request_id = asyncio.run(analyzer.request_missing_permissions(
+                            username=username,
+                            missing_tables=missing_tables,
+                            original_question=question,
+                            analysis_id=analysis_result.get('analysis_id', 'unknown')
+                        ))
+                        
+                        if request_id:
+                            return f"""-- ❌ Access denied to required tables: {', '.join(missing_tables)}
+-- 📝 Permission request #{request_id} has been created
+-- 👤 Please contact administrator for approval
+-- 🔍 Analysis confidence: {analysis_result.get('confidence', 0)}%"""
+                        else:
+                            return f"""-- ❌ Access denied to required tables: {', '.join(missing_tables)}
+-- ⚠️ Could not create permission request automatically
+-- 👤 Please contact administrator manually"""
+                    except Exception as e:
+                        return f"""-- ❌ Access denied to required tables: {', '.join(missing_tables)}
+-- ⚠️ Permission request failed: {str(e)[:100]}..."""
+                else:
+                    return "-- ❌ No accessible tables found for this question"
+            
+            # User has access - generate SQL with filtered schema
+            allowed_tables = analysis_result.get('allowed_tables', [])
+            missing_tables = analysis_result.get('missing_tables', [])
+            
+            # Use existing SQL generation but add analysis context
+            from utils.text_to_sql_converter import generate_sql_with_session_context
+            sql = handle_sql_generation_with_ai_analysis(user_input, st.session_state.username)
+            
+            # Add analysis comments
+            comments = []
+            comments.append(f"-- 🤖 AI Analysis: {analysis_result.get('confidence', 0)}% confidence")
+            comments.append(f"-- ✅ Accessible tables: {len(allowed_tables)}")
+            
+            if missing_tables:
+                comments.append(f"-- ⚠️ Limited access - Missing: {len(missing_tables)} tables")
+                comments.append(f"-- 📝 Consider requesting: {', '.join(missing_tables)}")
+            
+            return '\n'.join(comments) + '\n' + sql
+            
+        except Exception as e:
+            st.error(f"AI Analysis failed: {e}")
+            # Fallback to traditional generation
+            from utils.text_to_sql_converter import generate_sql_with_session_context
+            return generate_sql_with_session_context(question, username, session_id)
+    
+    else:
+        # Simple permission check only
+        from utils.enhanced_text_to_sql import generate_sql_with_permission_check
+        return generate_sql_with_permission_check(
+            question=question,
+            username=username,
+            enable_permission_check=True,
+            system_id=system_id
+        )
+    
 # Session state
 if 'messages' not in st.session_state:
     st.session_state.messages = []
@@ -364,11 +460,12 @@ async def execute_query(sql: str, username: str):
 
 def handle_sql_generation(question: str, username: str):
     """Generate SQL with database conversation context"""
-    from utils.text_to_sql_converter import generate_sql_with_session_context
+    from utils.enhanced_text_to_sql import generate_sql_with_permission_check
     
     session_id = st.session_state.get('session_id', None)
     system_id = st.session_state.get('selected_system', 'STYR')
     return generate_sql_with_session_context(question, username, session_id, system_id=system_id)
+
 
 def format_results(question: str, rows: list, username: str) -> str:
     """Format results based on role - NO unnecessary suggestions"""
@@ -439,6 +536,68 @@ with st.sidebar:
 
     st.markdown("---")
 
+    # NEW: AI Permission Settings (Collapsible)
+    with st.expander(f"🤖 AI Settings - {selected_system}", expanded=False):
+        # Permission checking toggle
+        enable_permission_check = st.checkbox(
+            "Enable Permission Analysis",
+            value=st.session_state.get('enable_permission_check', True),
+            help="AI analyzes required tables and checks permissions before generating SQL",
+            key="permission_check_toggle"
+        )
+        st.session_state.enable_permission_check = enable_permission_check
+        
+        # Show current user permissions for selected system
+        if enable_permission_check and st.session_state.username:
+            # Get user permissions summary
+            async def get_user_summary():
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            f"{GATEWAY_URL}/api/user/{st.session_state.username}/permissions",
+                            timeout=5.0
+                        )
+                        if response.status_code == 200:
+                            return response.json()
+                except:
+                    pass
+                return None
+            
+            # Show permission info
+            try:
+                permissions = asyncio.run(get_user_summary())
+                if permissions and not permissions.get('error'):
+                    st.markdown(f"**Role:** {permissions.get('role', 'Unknown')}")
+                    st.markdown(f"**Tables:** {permissions.get('table_count', 0)}")
+                    
+                    if permissions.get('has_restrictions'):
+                        st.warning("⚠️ Some restrictions apply")
+                    else:
+                        st.success("✅ Full access")
+                else:
+                    st.error("❌ Permission check failed")
+            except Exception as e:
+                st.error(f"❌ {str(e)[:50]}...")
+    
+    # AI Analysis Mode
+    analysis_mode = st.radio(
+        "Analysis Mode",
+        ["Smart (AI predicts tables)", "Simple (Permission check only)"],
+        index=0 if st.session_state.get('use_smart_analysis', True) else 1,
+        help="Smart mode uses AI to predict required tables. Simple mode only checks permissions.",
+        key="analysis_mode_radio"
+    )
+    st.session_state.use_smart_analysis = (analysis_mode.startswith("Smart"))
+    
+    # Show last analysis if available
+    if 'last_analysis' in st.session_state and st.session_state.last_analysis:
+        analysis = st.session_state.last_analysis
+        with st.container():
+            st.markdown("**Last Analysis:**")
+            st.markdown(f"Confidence: {analysis.get('confidence', 0)}%")
+            if analysis.get('missing_tables'):
+                st.markdown(f"⚠️ Missing: {len(analysis['missing_tables'])} tables")
+
     # Page Navigation
     if st.button("💬 Chat Assistant", use_container_width=True, disabled=True):
         pass  # Current page
@@ -447,6 +606,7 @@ with st.sidebar:
     
     st.markdown("---")
 
+    # Existing login section...
     if st.session_state.username is None:
         st.markdown("### Login")
         username = st.selectbox(
@@ -469,8 +629,8 @@ with st.sidebar:
                 initialize_chat_session()
                 st.rerun()
     else:
+        
         st.markdown(f"**{st.session_state.username.upper()}**")
-        # Show current date context
         st.markdown(f"**Today:** {TODAY.strftime('%B %d, %Y')}")
 
         if st.button("Logout", use_container_width=True):
@@ -656,11 +816,7 @@ else:
 
         with st.spinner("Analyzing..."):
             try:
-                sql = generate_sql_with_session_context(
-                    user_input,
-                    st.session_state.username,
-                    st.session_state.get("session_id", None)
-                )
+                sql = handle_sql_generation_with_ai_analysis(user_input, st.session_state.username)
                 print(f"DEBUG SQL = {sql}")
 
                 if not sql or not sql.strip().upper().startswith("SELECT"):

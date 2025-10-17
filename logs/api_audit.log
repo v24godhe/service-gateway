@@ -1070,3 +1070,7 @@
 2025-10-16 17:23:37 | INFO | {"event": "service_startup", "timestamp": "2025-10-16T17:23:37.060821", "service": "Service Gateway"}
 2025-10-16 17:26:14 | INFO | {"request_id": "3870c473-dcf3-41b7-b4b0-e59cb5cc3e94", "timestamp": "2025-10-16T17:26:14.998365", "operation_type": "SELECT", "table_name": null, "query": "SELECT KHKNR, KHFKN FROM DCPO.KHKNDHUR WHERE KHKNR = 330", "execution_time_ms": 5.682945251464844, "row_count": 1, "success": true, "error": null}
 2025-10-16 17:35:48 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-16T17:35:48.790205", "service": "Service Gateway"}
+2025-10-16 17:35:53 | INFO | {"event": "service_startup", "timestamp": "2025-10-16T17:35:53.606698", "service": "Service Gateway"}
+2025-10-17 10:24:50 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-17T10:24:50.528719", "service": "Service Gateway"}
+2025-10-17 10:36:19 | INFO | {"event": "service_startup", "timestamp": "2025-10-17T10:36:19.401198", "service": "Service Gateway"}
+2025-10-17 11:40:20 | INFO | {"event": "service_shutdown", "timestamp": "2025-10-17T11:40:20.408455", "service": "Service Gateway"}
