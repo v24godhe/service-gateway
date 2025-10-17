@@ -355,6 +355,18 @@ def handle_sql_generation_with_ai_analysis(question: str, username: str):
         try:
             # Analyze question with AI
             analysis_result = analyze_tables_sync(question, username, system_id)
+
+            # ADD THIS DEBUG BLOCK:
+            print(f"🔍 FULL ANALYSIS RESULT:")
+            print(f"  - success: {analysis_result.get('success')}")
+            print(f"  - can_execute: {analysis_result.get('can_execute')}")
+            print(f"  - predicted_tables: {analysis_result.get('predicted_tables')}")
+            print(f"  - allowed_tables: {analysis_result.get('allowed_tables')}")
+            print(f"  - missing_tables: {analysis_result.get('missing_tables')}")
+            print(f"  - confidence: {analysis_result.get('confidence')}")
+
+            # Store analysis in session state for display in sidebar
+            st.session_state.last_analysis = analysis_result
             
             # Store analysis in session state for display in sidebar
             st.session_state.last_analysis = analysis_result
@@ -818,7 +830,7 @@ else:
 
         with st.spinner("Analyzing..."):
             try:
-                sql = generate_sql_with_session_context(user_input, username)
+                sql = handle_sql_generation_with_ai_analysis(user_input, username)
                 st.write(f"DEBUG: Analysis sql: {sql}")
                 if not sql or not sql.strip().upper().startswith("SELECT"):
                     response = (
