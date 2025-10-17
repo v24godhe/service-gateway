@@ -1,0 +1,1147 @@
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
+import uvicorn
+import json
+from models.schemas import (TrackingRequest, TrackingResponse, 
+                           CustomerByIdRequest, CustomerSearchRequest, CustomerResponse)
+from services.order_service import OrderService
+from services.customer_service import CustomerService
+from database.styr_connector import StyrDatabaseConnector
+from utils.auth import verify_auth_token
+from utils.response_formatter import response_formatter
+from utils.request_middleware import RequestTrackingMiddleware
+from utils.fallback import fallback_manager
+from utils.health_monitor import health_monitor
+from utils.audit_logger import audit_logger
+from utils.audit_middleware import AuditMiddleware
+from datetime import datetime
+import time
+from typing import List
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from utils.error_handler import error_handler
+from utils.input_sanitizer import input_sanitizer
+
+from services.query_service import QueryService
+from utils.user_manager import get_user
+from models.query_schemas import DynamicQueryRequest, DynamicQueryResponse
+from utils.query_validator import query_validator
+from services.query_learning_service import QueryLearningService
+import os
+from services.conversation_memory_service import conversation_manager
+import re
+
+from fastapi.responses import StreamingResponse
+from services.export_service import ExportService
+import logging
+
+from services.permission_management_service import PermissionManagementService
+from typing import List
+from fastapi import Body, Header
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+QUERY_LEARNING_ENABLED = os.getenv("QUERY_CACHE_ENABLED", "true").lower() == "true"
+export_service = ExportService()
+
+app = FastAPI(title="Service Gateway", version="1.0.0")
+app.add_exception_handler(HTTPException, error_handler.http_exception_handler)
+app.add_exception_handler(StarletteHTTPException, error_handler.http_exception_handler)
+app.add_exception_handler(RequestValidationError, error_handler.validation_exception_handler)
+app.add_exception_handler(Exception, error_handler.general_exception_handler)
+
+# Add request tracking middleware
+app.add_middleware(RequestTrackingMiddleware)
+
+# Database setup
+db_connector = StyrDatabaseConnector()
+order_service = OrderService(db_connector)
+customer_service = CustomerService(db_connector)
+query_service = QueryService(db_connector)
+
+
+# Initialize Query Learning Service with Windows Auth
+def init_query_learning():
+    if not QUERY_LEARNING_ENABLED:
+        return None
+    
+    try:
+        conn_str = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+            f"Trusted_Connection=yes;"
+        )
+        return QueryLearningService(conn_str)
+    except Exception as e:
+        print(f"Warning: Query Learning Service initialization failed: {e}")
+        return None
+
+query_learning_service = init_query_learning()
+
+# Initialize Permission Management Service
+def init_permission_management():
+    try:
+        conn_str = (
+            f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+            f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\SQLEXPRESS')};"
+            f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+            f"Trusted_Connection=yes;"
+        )
+        return PermissionManagementService(conn_str)
+    except Exception as e:
+        print(f"Warning: Permission Management Service initialization failed: {e}")
+        return None
+
+permission_service = init_permission_management()
+
+def _is_followup_question(question: str) -> bool:
+    """Detect if question is a follow-up based on pronouns and references"""
+    question_lower = question.lower()
+    
+    # Pronouns and references that indicate follow-up
+    followup_indicators = [
+        'their', 'his', 'her', 'its', 'this', 'that', 'these', 'those',
+        'the same', 'same customer', 'same order', 'also', 'too',
+        'what about', 'how about', 'and', 'for them', 'for him', 'for her',
+        'it', 'they', 'from above', 'previous', 'last one'
+    ]
+    
+    return any(indicator in question_lower for indicator in followup_indicators)
+
+
+def _extract_tables_from_sql(sql: str) -> List[str]:
+    """Extract table names from SQL query"""
+    tables = []
+    sql_upper = sql.upper()
+    
+    # Simple table extraction
+    table_list = [
+        "DCPO.KHKNDHUR", "DCPO.OHKORDHR", "DCPO.ORKORDRR",
+        "DCPO.KRKFAKTR", "DCPO.KIINBETR", "DCPO.LHLEVHUR",
+        "DCPO.AHARTHUR", "EGU.AYARINFR", "EGU.WSOUTSAV",
+        "DCPO.IHIORDHR", "DCPO.IRIORDRR"
+    ]
+    
+    for table in table_list:
+        if table in sql_upper:
+            tables.append(table)
+    
+    return tables
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://10.200.0.1:8000"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/audit/stats")
+async def get_audit_stats(request: Request, hours: int = 24):
+    """Get audit statistics"""
+    stats = audit_logger.get_audit_stats(hours)
+    return response_formatter.success_response(
+        data=stats,
+        message="Audit statistics retrieved",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.on_event("startup")
+async def startup():
+    await db_connector.connect()
+    audit_logger.api_logger.info(json.dumps({
+        "event": "service_startup",
+        "timestamp": datetime.now().isoformat(),
+        "service": "Service Gateway"
+    }))
+
+@app.on_event("shutdown")
+async def shutdown():
+    await db_connector.disconnect()
+    audit_logger.api_logger.info(json.dumps({
+        "event": "service_shutdown", 
+        "timestamp": datetime.now().isoformat(),
+        "service": "Service Gateway"
+    }))
+
+@app.get("/health")
+async def health_check(request: Request):
+    db_healthy = await db_connector.health_check()
+    fallback_status = fallback_manager.get_status()
+    
+    return response_formatter.success_response(
+        data={
+            "database": "connected" if db_healthy else "disconnected",
+            "fallback_manager": fallback_status,
+            "service_status": "healthy" if db_healthy else "degraded"
+        },
+        message="Health check completed",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.get("/fallback/status")
+async def get_fallback_status():
+    return fallback_manager.get_status()
+
+@app.post("/api/tracking", response_model=TrackingResponse)
+async def get_tracking_data(
+    request: Request,
+    tracking_request: TrackingRequest,
+    auth_user=Depends(verify_auth_token)
+):
+    return await order_service.get_order_data(tracking_request)
+
+@app.post("/api/customer")
+async def get_customer_by_id(
+    request: Request,
+    customer_request: CustomerByIdRequest,
+    auth_user=Depends(verify_auth_token)
+):
+    sanitized_data = input_sanitizer.sanitize_request_data(customer_request.dict())
+    sanitized_request = CustomerByIdRequest(**sanitized_data)
+    return await customer_service.get_customer_by_id(
+        sanitized_request, 
+        getattr(request.state, 'request_id', None)
+    )
+
+@app.post("/api/customer/search")
+async def search_customers(
+    request: Request,
+    search_request: CustomerSearchRequest,
+    auth_user=Depends(verify_auth_token)
+):
+    sanitized_data = input_sanitizer.sanitize_request_data(search_request.dict())
+    sanitized_request = CustomerSearchRequest(**sanitized_data)  # ✅ FIXED
+    return await customer_service.search_customers(
+        sanitized_request,
+        getattr(request.state, 'request_id', None)
+    )
+
+
+@app.post("/api/execute-query")
+async def execute_query(query_request: DynamicQueryRequest, request: Request):
+    """Execute dynamic SQL query with conversation memory"""
+    print("Query captured at API:", query_request.query)
+    # Get username from header
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    # Get user info
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    
+    user_role = user.role.value
+    question = query_request.query
+    session_id = getattr(request.state, 'request_id', None)
+    
+    # Get or create conversation session
+    conversation = conversation_manager.get_or_create_session(session_id, username)
+    
+    # Validate user access
+    has_access, access_error = query_validator.validate_user_access(query_request.query, user)
+    
+    # If access denied, create permission request
+    if not has_access:
+        raise HTTPException(
+            status_code=403,
+            detail=access_error  # This already contains the request_id from query_validator
+        )
+
+    # Add user message to conversation history
+    conversation.add_message('user', question)
+    
+    # Check if this is a follow-up question (contains pronouns or references)
+    is_followup = _is_followup_question(question)
+    
+    # Enhance query with conversation context if it's a follow-up
+    # Get conversation context for AI (don't add to SQL)
+    context = None
+    if is_followup:
+        context = conversation.get_context_for_query()
+        if context:
+            print(f"Using context for session {session_id}: {context[:100]}")
+
+    # Step 1: Check cache first (use original question)
+    if query_learning_service:
+        try:
+            cached_result = query_learning_service.get_cached_query(question, user_role)
+            if cached_result:
+                # Add assistant response to conversation
+                conversation.add_message('assistant', 'Returned cached results')
+                
+                return {
+                    "success": True,
+                    "data": cached_result.get("result_json", {}),
+                    "source": "cache",
+                    "sql": cached_result.get("sql_query")
+                }
+        except Exception as e:
+            print(f"Cache lookup failed: {e}")
+    
+    # Step 2: Generate and execute query
+    start_time = time.time()
+    
+    try:
+        # Execute query using existing query_service
+        result = await query_service.execute_dynamic_query(
+            query_request,
+            getattr(request.state, 'request_id', None)
+        )
+        
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        success = result.get("success", False)
+        
+        if success:
+            # Extract tables used from SQL
+            sql_generated = result.get("sql", "")
+            tables_used = _extract_tables_from_sql(sql_generated)
+            row_count = len(result.get("data", {}).get("rows", []))
+            
+            # Update conversation context
+            conversation.update_query_context(
+                query=question,
+                sql=sql_generated,
+                result_count=row_count,
+                tables=tables_used
+            )
+            
+            # Add assistant response to conversation
+            conversation.add_message(
+                'assistant',
+                f'Query executed successfully. {row_count} results.',
+                {'sql': sql_generated, 'tables': tables_used}
+            )
+        
+        # Step 3: Log query execution
+        if query_learning_service:
+            try:
+                sql_generated = result.get("sql", "")
+                row_count = len(result.get("data", {}).get("rows", []))
+                error_message = result.get("message") if not success else None
+                
+                query_learning_service.log_query(
+                    user_id=username,
+                    user_role=user_role,
+                    question=question,  # Use original question, not enhanced
+                    sql_generated=sql_generated,
+                    execution_time_ms=execution_time_ms,
+                    success=success,
+                    error_message=error_message,
+                    row_count=row_count,
+                    session_id=session_id
+                )
+                
+                # Step 4: Cache successful results
+                if success and row_count > 0:
+                    query_learning_service.save_to_cache(
+                        question=question,  # Use original question
+                        user_role=user_role,
+                        sql_query=sql_generated,
+                        result_data=result.get("data", {}),
+                        ttl_minutes=int(os.getenv("QUERY_CACHE_TTL_MINUTES", 60))
+                    )
+                
+                # Step 5: Update performance metrics
+                query_learning_service.update_performance(
+                    question=question,
+                    user_role=user_role,
+                    execution_time_ms=execution_time_ms
+                )
+            except Exception as e:
+                print(f"Query learning service error: {e}")
+        
+        result["source"] = "database"
+        result["is_followup"] = is_followup
+        return result
+        
+    except Exception as e:
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        # Log failed query
+        if query_learning_service:
+            try:
+                query_learning_service.log_query(
+                    user_id=username,
+                    user_role=user_role,
+                    question=question,
+                    execution_time_ms=execution_time_ms,
+                    success=False,
+                    error_message=str(e),
+                    session_id=session_id
+                )
+            except:
+                pass
+        
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/query-suggestions")
+async def get_query_suggestions(request: Request, limit: int = 5):
+    """Get query suggestions based on user role"""
+    
+    if not query_learning_service:
+        return {"suggestions": []}
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    
+    try:
+        suggestions = query_learning_service.get_query_suggestions(
+            user_role=user.role.value,
+            limit=limit
+        )
+        return {"suggestions": suggestions}
+    except Exception as e:
+        return {"suggestions": [], "error": str(e)}
+
+
+@app.get("/api/cache-stats")
+async def get_cache_statistics(request: Request):
+    """Get cache performance statistics (Admin only)"""
+    
+    if not query_learning_service:
+        return {"enabled": False, "message": "Query learning is disabled"}
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    # Only allow CEO to view stats
+    user = get_user(username)
+    if not user or user.role.value != "ceo":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        stats = query_learning_service.get_cache_statistics()
+        stats["enabled"] = True
+        return stats
+    except Exception as e:
+        return {"enabled": True, "error": str(e)}
+
+
+@app.post("/api/clear-cache")
+async def clear_expired_cache(request: Request):
+    """Manually clear expired cache entries (Admin only)"""
+    
+    if not query_learning_service:
+        raise HTTPException(status_code=503, detail="Query learning is disabled")
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    # Only allow CEO to clear cache
+    user = get_user(username)
+    if not user or user.role.value != "ceo":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        deleted_count = query_learning_service.clean_expired_cache()
+        return {
+            "success": True,
+            "deleted_entries": deleted_count,
+            "message": f"Cleared {deleted_count} expired cache entries"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/schema")
+async def get_database_schema(
+    request: Request,
+    auth_user=Depends(verify_auth_token)
+):
+    """Get database schema metadata for AI query generation"""
+    return await query_service.get_database_schema(
+        getattr(request.state, 'request_id', None)
+    )
+
+
+@app.post("/api/export-pdf")
+async def export_query_to_pdf(query_request: DynamicQueryRequest, request: Request):
+    """Export query results to PDF"""
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    
+    try:
+        # Execute query to get data
+        result = await query_service.execute_dynamic_query(
+            query_request,
+            getattr(request.state, 'request_id', None)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail="Query execution failed")
+        
+        # Get data
+        data = result.get("data", {}).get("rows", [])
+        
+        if not data:
+            raise HTTPException(status_code=404, detail="No data to export")
+        
+        # Generate PDF
+        pdf_buffer = export_service.export_to_pdf(
+            data=data,
+            title="Query Results",
+            user_name=username.upper(),
+            query=None  
+        )
+        
+        # Return as downloadable file
+        filename = f"query_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        
+        return StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF export failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/export-excel")
+async def export_query_to_excel(query_request: DynamicQueryRequest, request: Request):
+    """Export query results to Excel"""
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    user = get_user(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid user")
+    
+    try:
+        # Execute query to get data
+        result = await query_service.execute_dynamic_query(
+            query_request,
+            getattr(request.state, 'request_id', None)
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail="Query execution failed")
+        
+        # Get data
+        data = result.get("data", {}).get("rows", [])
+        
+        if not data:
+            raise HTTPException(status_code=404, detail="No data to export")
+        
+        # Generate Excel
+        excel_buffer = export_service.export_to_excel(
+            data=data,
+            title=f"Query Results",
+            user_name=username.upper(),
+            query=None  
+        )
+        
+        # Return as downloadable file
+        filename = f"query_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        return StreamingResponse(
+            excel_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Excel export failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/clear-conversation")
+async def clear_conversation(request: Request):
+    """Clear conversation memory for current session"""
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    session_id = getattr(request.state, 'request_id', None)
+    
+    conversation_manager.clear_session(session_id)
+    
+    return {
+        "success": True,
+        "message": "Conversation memory cleared"
+    }
+
+
+# ADD NEW ENDPOINT: Get conversation context
+
+@app.get("/api/conversation-context")
+async def get_conversation_context(request: Request):
+    """Get current conversation context"""
+    
+    username = request.headers.get("X-Username")
+    if not username:
+        raise HTTPException(status_code=401, detail="Username required")
+    
+    session_id = getattr(request.state, 'request_id', None)
+    
+    conversation = conversation_manager.get_or_create_session(session_id, username)
+    
+    return {
+        "session_id": session_id,
+        "message_count": len(conversation.messages),
+        "entities": conversation.entities,
+        "last_query": conversation.last_query,
+        "last_tables": conversation.last_tables_used,
+        "context": conversation.get_context_for_query()
+    }
+
+
+# ========== DATABASE CONVERSATION MEMORY ENDPOINTS ==========
+
+def get_memory_connection_string():
+    """Get connection string for memory database"""
+    return (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={os.getenv('QUERY_LEARNING_DB_SERVER', 'FSDHWFP01\\\\SQLEXPRESS')};"
+        f"DATABASE={os.getenv('QUERY_LEARNING_DB_DATABASE', 'query_learning_db')};"
+        f"Trusted_Connection=yes;"
+    )
+
+@app.post("/api/conversation/create-session")
+async def create_conversation_session(
+    session_id: str = Body(...),
+    user_id: str = Body(...),
+    metadata: dict = Body(None)
+):
+    """Create a new conversation session in database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
+        
+        # Use create_or_get_session (not create_session)
+        success = db_service.create_or_get_session(
+            session_id=session_id,
+            user_id=user_id
+        )
+        
+        return {
+            "success": success,
+            "session_id": session_id,
+            "message": "Session created successfully" if success else "Failed to create session"
+        }
+        
+    except Exception as e:
+        logger.error(f"Create session failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conversation/save-message")
+async def save_conversation_message(
+    session_id: str = Body(...),
+    message_type: str = Body(...),
+    message_content: str = Body(...),
+    message_metadata: str = Body(None)
+):
+    """Save a message to database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
+        
+        # Convert metadata from string to dict if provided
+        metadata_dict = json.loads(message_metadata) if message_metadata else None
+        
+        # Use correct parameter name 'content' not 'message_content'
+        success = db_service.save_message(
+            session_id=session_id,
+            message_type=message_type,
+            content=message_content,
+            metadata=metadata_dict
+        )
+        
+        return {
+            "success": success,
+            "message": "Message saved successfully" if success else "Failed to save message"
+        }
+        
+    except Exception as e:
+        logger.error(f"Save message failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/conversation/get-messages/{session_id}")
+async def get_conversation_messages(session_id: str):
+    """Get all messages for a session from database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
+        
+        # Use get_conversation_history (not get_session_messages)
+        messages = db_service.get_conversation_history(session_id)
+        
+        # Convert to expected format
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "message_type": msg["role"],
+                "message_content": msg["content"],
+                "timestamp": msg["timestamp"],
+                "metadata": msg["metadata"]
+            })
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "message_count": len(formatted_messages),
+            "messages": formatted_messages
+        }
+        
+    except Exception as e:
+        logger.error(f"Get messages failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/conversation/update-context")
+async def update_conversation_context(
+    session_id: str = Body(...),
+    last_query: str = Body(...),
+    last_sql: str = Body(None),
+    last_tables_used: str = Body(None),
+    result_count: int = Body(0)
+):
+    """Update conversation context in database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
+        
+        # Convert tables string to list
+        tables_list = last_tables_used.split(",") if last_tables_used else None
+        
+        # Use update_context (not update_conversation_context)
+        success = db_service.update_context(
+            session_id=session_id,
+            query=last_query,
+            sql=last_sql,
+            tables=tables_list,
+            result_count=result_count
+        )
+        
+        return {
+            "success": success,
+            "message": "Context updated successfully" if success else "Failed to update context"
+        }
+        
+    except Exception as e:
+        logger.error(f"Update context failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/conversation/clear-session/{session_id}")
+async def clear_conversation_session(session_id: str):
+    """Clear all messages for a session from database"""
+    try:
+        from services.persistent_memory_service import PersistentMemoryService
+        conn_str = get_memory_connection_string()
+        db_service = PersistentMemoryService(conn_str)
+        
+        # Use clear_session (this method exists)
+        success = db_service.clear_session(session_id)
+        
+        return {
+            "success": success,
+            "session_id": session_id,
+            "message": "Session cleared successfully" if success else "Failed to clear session"
+        }
+        
+    except Exception as e:
+        logger.error(f"Clear session failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ========== END DATABASE CONVERSATION MEMORY ENDPOINTS ==========
+
+
+
+# Helth Checking
+
+@app.get("/health")
+async def basic_health_check(request: Request):
+    """Basic health check for load balancers"""
+    db_healthy = await db_connector.health_check()
+    
+    return response_formatter.success_response(
+        data={
+            "status": "healthy" if db_healthy else "degraded",
+            "database": "connected" if db_healthy else "disconnected"
+        },
+        message="Basic health check completed",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.get("/health/comprehensive")
+async def comprehensive_health_check(request: Request):
+    """Comprehensive health check with detailed metrics"""
+    health_data = await health_monitor.comprehensive_health_check(db_connector)
+    
+    return response_formatter.success_response(
+        data=health_data,
+        message="Comprehensive health check completed",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.get("/health/database")
+async def database_health_check(request: Request):
+    """Dedicated database health check"""
+    db_health = await health_monitor._check_database_health(db_connector)
+    
+    return response_formatter.success_response(
+        data=db_health,
+        message="Database health check completed",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.get("/health/history")
+async def get_health_history(request: Request, minutes: int = 60):
+    """Get health check history"""
+    history = health_monitor.get_health_history(minutes)
+    
+    return response_formatter.success_response(
+        data={
+            "history": history,
+            "period_minutes": minutes,
+            "total_entries": len(history)
+        },
+        message=f"Retrieved {len(history)} health entries from last {minutes} minutes",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.get("/health/summary")
+async def get_health_summary(request: Request):
+    """Get health summary statistics"""
+    summary = health_monitor.get_health_summary()
+    
+    return response_formatter.success_response(
+        data=summary,
+        message="Health summary retrieved",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+@app.get("/health/circuit-breaker")
+async def get_circuit_breaker_status(request: Request):
+    """Get circuit breaker status"""
+    circuit_status = health_monitor._check_circuit_breaker_health()
+    
+    return response_formatter.success_response(
+        data=circuit_status,
+        message="Circuit breaker status retrieved",
+        request_id=getattr(request.state, 'request_id', None)
+    ).dict()
+
+# -------------------- Super Admin Authentication --------------------
+
+@app.post("/api/admin/login")
+async def admin_login(
+    username: str = Body(...),
+    password: str = Body(...)  # You can add password validation later
+):
+    """
+    Super admin login
+    For now, just checks if user is super admin
+    TODO: Add password authentication
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    is_admin = permission_service.is_super_admin(username)
+    
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Not authorized as super admin")
+    
+    # Update last login
+    permission_service.update_admin_last_login(username)
+    
+    return {
+        "success": True,
+        "username": username,
+        "message": "Admin login successful"
+    }
+
+
+@app.get("/api/admin/check/{username}")
+async def check_admin_status(username: str):
+    """Check if a user is a super admin"""
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    is_admin = permission_service.is_super_admin(username)
+    
+    return {"is_admin": is_admin}
+
+
+# -------------------- Permission Requests --------------------
+
+@app.post("/api/permission-request")
+async def create_permission_request(
+    user_id: str = Body(...),
+    user_role: str = Body(...),
+    requested_table: str = Body(...),
+    original_question: str = Body(...),
+    blocked_sql: str = Body(None),
+    requested_columns: List[str] = Body(None),
+    justification: str = Body(None)
+):
+    """
+    Create a new permission request
+    Called when user tries to access restricted data
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    request_id = permission_service.create_permission_request(
+        user_id=user_id,
+        user_role=user_role,
+        requested_table=requested_table,
+        original_question=original_question,
+        requested_columns=requested_columns,
+        blocked_sql=blocked_sql,
+        justification=justification
+    )
+    
+    if request_id:
+        return {
+            "success": True,
+            "request_id": request_id,
+            "message": "Permission request created. An administrator will review it shortly."
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to create permission request")
+
+
+@app.get("/api/permission-requests/pending")
+async def get_pending_requests(admin_username: str = Header(None, alias="X-Admin-Username")):
+    """
+    Get all pending permission requests
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not admin_username or not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    requests = permission_service.get_pending_requests()
+    
+    return {
+        "pending_count": len(requests),
+        "requests": requests
+    }
+
+
+@app.get("/api/permission-requests/all")
+async def get_all_requests(
+    status: str = None,
+    limit: int = 100,
+    admin_username: str = Header(None, alias="X-Admin-Username")
+):
+    """
+    Get all permission requests with optional status filter
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not admin_username or not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    requests = permission_service.get_all_requests(status=status, limit=limit)
+    
+    return {
+        "total": len(requests),
+        "status_filter": status,
+        "requests": requests
+    }
+
+
+@app.post("/api/permission-requests/{request_id}/approve")
+async def approve_request(
+    request_id: int,
+    review_notes: str = Body(None),
+    temporary: bool = Body(False),
+    days_valid: int = Body(30),
+    admin_username: str = Header(..., alias="X-Admin-Username")
+):
+    """
+    Approve a permission request
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    # Calculate expiration if temporary
+    expires_at = None
+    if temporary:
+        from datetime import datetime, timedelta
+        expires_at = datetime.now() + timedelta(days=days_valid)
+    
+    success = permission_service.approve_permission_request(
+        request_id=request_id,
+        admin_username=admin_username,
+        review_notes=review_notes,
+        expires_at=expires_at
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": "Permission request approved and RBAC rules updated",
+            "temporary": temporary,
+            "expires_at": expires_at.isoformat() if expires_at else None
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to approve request")
+
+
+@app.post("/api/permission-requests/{request_id}/deny")
+async def deny_request(
+    request_id: int,
+    review_notes: str = Body(...),
+    admin_username: str = Header(..., alias="X-Admin-Username")
+):
+    """
+    Deny a permission request
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    success = permission_service.deny_permission_request(
+        request_id=request_id,
+        admin_username=admin_username,
+        review_notes=review_notes
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": "Permission request denied"
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to deny request")
+
+
+# -------------------- RBAC Management --------------------
+
+@app.get("/api/rbac/rules/{role}")
+async def get_rbac_rules(role: str):
+    """
+    Get RBAC rules for a specific role
+    Returns allowed tables and column restrictions
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    rules = permission_service.get_rbac_rules_for_role(role)
+    
+    return rules
+
+
+@app.get("/api/rbac/rules")
+async def get_all_rbac_rules(admin_username: str = Header(None, alias="X-Admin-Username")):
+    """
+    Get all RBAC rules for all roles
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not admin_username or not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    rules = permission_service.get_all_rbac_rules()
+    
+    return {"roles": rules}
+
+
+@app.post("/api/rbac/add-rule")
+async def add_rbac_rule(
+    user_role: str = Body(...),
+    table_name: str = Body(...),
+    allowed_columns: List[str] = Body(None),
+    blocked_columns: List[str] = Body(None),
+    notes: str = Body(None),
+    admin_username: str = Header(..., alias="X-Admin-Username")
+):
+    """
+    Add or update an RBAC rule
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    success = permission_service.add_rbac_rule(
+        user_role=user_role,
+        table_name=table_name,
+        admin_username=admin_username,
+        allowed_columns=allowed_columns,
+        blocked_columns=blocked_columns,
+        notes=notes
+    )
+    
+    if success:
+        return {
+            "success": True,
+            "message": f"RBAC rule updated for {user_role} on {table_name}"
+        }
+    else:
+        raise HTTPException(status_code=500, detail="Failed to add RBAC rule")
+
+
+# -------------------- Statistics & Monitoring --------------------
+
+@app.get("/api/permission-stats")
+async def get_permission_stats(admin_username: str = Header(..., alias="X-Admin-Username")):
+    """
+    Get permission management statistics
+    Super admin only
+    """
+    if not permission_service:
+        raise HTTPException(status_code=500, detail="Permission service unavailable")
+    
+    # Verify admin
+    if not permission_service.is_super_admin(admin_username):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    
+    stats = permission_service.get_permission_stats()
+    
+    return stats
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)
