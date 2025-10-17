@@ -194,9 +194,12 @@ def clean_sql_output(sql: str) -> str:
 def generate_sql(question: str, username: str, conversation_history=None, role_context_override="", system_id: str = "STYR") -> str:
     """Generate SQL using UNIVERSAL context memory - remembers ALL entities and topics"""
     
-    # Initialize prompt manager
+    print("🎯 CALLED: generate_sql()")
     pm = get_prompt_manager()
     DATABASE_SCHEMA = pm.get_dynamic_schema(system_id, username)
+    print(f"🎯 Schema length: {len(DATABASE_SCHEMA)}")
+    print(f"🎯 Schema contains KHEML: {'KHEML' in DATABASE_SCHEMA}")
+
     # Load role prompt from database, fallback to hardcoded
     role_ctx_from_db = pm.get_prompt(system_id, 'ROLE_SYSTEM', username)
     role_ctx = role_context_override or role_ctx_from_db or ROLE_PROMPTS.get(username, "")
@@ -596,7 +599,7 @@ def generate_sql_with_session_context(question: str, username: str, session_id: 
     """
     Generate SQL using database session context - works for both chat and chart assistants
     """
-    
+    print("🎯 CALLED: generate_sql_with_session_context()")
     # Get conversation history from database if session_id provided
     conversation_history = []
     if session_id:

@@ -41,13 +41,13 @@ class QueryService:
             # Log successful execution
             self.audit_logger.log_database_operation(
                 request_id=request_id or "unknown",
-                operation_type="SELECT",
-                table_name=None,  # Extract if needed
-                query=safe_query,
+                operation_type="dynamic_query",
+                table_name=getattr(request, 'query_type', 'custom') if hasattr(request, 'query_type') else "custom",
+                query=safe_query if 'safe_query' in locals() else "FAILED_TO_PARSE",
                 execution_time_ms=execution_time,
-                row_count=len(raw_data),
-                success=True,
-                error=None
+                row_count=0,
+                success=False,
+                error=str(e)
             )
             
             return self.response_formatter.success_response(
@@ -165,15 +165,15 @@ class QueryService:
             # Log the error but DO NOT fallback to any hardcoded methods
             if request_id:
                 self.audit_logger.log_database_operation(
-                    request_id=request_id,
-                    operation_type="get_schema",
-                    table_name="ALL",
-                    query="GET_DATABASE_SCHEMA_VIA_GATEWAY",
-                    execution_time_ms=0,
-                    row_count=0,
-                    success=False,
-                    error=str(e)
-                )
+                request_id=request_id,
+                operation_type="get_schema",
+                table_name="ALL",
+                query="GET_DATABASE_SCHEMA_VIA_GATEWAY",
+                execution_time_ms=0,
+                row_count=0,
+                success=False,
+                error=str(e)
+            )
             
             return {
                 "error": f"Schema loading failed: {str(e)}",
