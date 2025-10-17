@@ -2009,11 +2009,11 @@ async def get_user_permissions_summary(username: str):
 def get_user_role(username: str) -> str:
     """Helper function to get user role from username"""
     role_mapping = {
-        'harold': 'CEO',
-        'lars': 'Finance', 
-        'pontus': 'Call Center',
-        'peter': 'Logistics',
-        'linda': 'Customer Service'
+            'harold': 'ceo',
+            'lars': 'finance', 
+            'pontus': 'call_center',
+            'peter': 'logistics',
+            'linda': 'customer_service'
     }
     return role_mapping.get(username, username)
 
