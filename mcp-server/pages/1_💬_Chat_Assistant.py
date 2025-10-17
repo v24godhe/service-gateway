@@ -830,7 +830,7 @@ else:
 
         with st.spinner("Analyzing..."):
             try:
-                sql = handle_sql_generation_with_ai_analysis(user_input, username)
+                sql = handle_sql_generation_with_ai_analysis(user_input, st.session_state.username)
                 st.write(f"DEBUG: Analysis sql: {sql}")
                 if not sql or not sql.strip().upper().startswith("SELECT"):
                     response = (
