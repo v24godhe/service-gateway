@@ -197,9 +197,11 @@ def generate_sql(question: str, user_role: str, conversation_history=None, role_
     print("🎯 CALLED: generate_sql()")
     pm = get_prompt_manager()
     DATABASE_SCHEMA = pm.get_dynamic_schema(system_id, user_role)
+    
+    # ADD THESE DEBUG LINES:
     print(f"🎯 Schema length: {len(DATABASE_SCHEMA)}")
-    print(f"🎯 Schema contains KHEML: {'KHEML' in DATABASE_SCHEMA}")
-
+    print(f"🎯 Schema preview (first 500 chars): {DATABASE_SCHEMA[:500]}")
+    print(f"🎯 Schema contains 'KHKNDHUR': {'KHKNDHUR' in DATABASE_SCHEMA}")
     # Load role prompt from database, fallback to hardcoded
     role_ctx_from_db = pm.get_prompt(system_id, 'ROLE_SYSTEM', user_role)
     role_ctx = role_context_override or role_ctx_from_db or ROLE_PROMPTS.get(user_role, "")

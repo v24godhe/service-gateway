@@ -398,6 +398,11 @@ def handle_sql_generation_with_ai_analysis(question: str, username: str):
             # User has access - generate SQL with filtered schema
             allowed_tables = analysis_result.get('allowed_tables', [])
             missing_tables = analysis_result.get('missing_tables', [])
+
+            print(f"🔍 DEBUG: can_execute = {analysis_result.get('can_execute')}")
+            print(f"🔍 DEBUG: allowed_tables = {allowed_tables}")
+            print(f"🔍 DEBUG: missing_tables = {missing_tables}")
+            print(f"🔍 DEBUG: About to call generate_sql_with_session_context()")
             
             # Use existing SQL generation but add analysis context
             sql = generate_sql_with_session_context(question, username, session_id)
